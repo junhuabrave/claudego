@@ -1,0 +1,59 @@
+{
+  "family": "finmonitor",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "${EXECUTION_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+  "containerDefinitions": [
+    {
+      "name": "backend",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/finmonitor-backend:latest",
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "APP_ENV", "value": "production" },
+        { "name": "LOG_LEVEL", "value": "WARNING" }
+      ],
+      "secrets": [
+        { "name": "DATABASE_URL", "valueFrom": "${DB_SECRET_ARN}:database_url::" },
+        { "name": "FINNHUB_API_KEY", "valueFrom": "${API_KEYS_SECRET_ARN}:finnhub_api_key::" },
+        { "name": "NEWS_API_KEY", "valueFrom": "${API_KEYS_SECRET_ARN}:news_api_key::" },
+        { "name": "PAGERDUTY_API_KEY", "valueFrom": "${API_KEYS_SECRET_ARN}:pagerduty_api_key::" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/finmonitor",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "backend"
+        }
+      },
+      "essential": true
+    },
+    {
+      "name": "frontend",
+      "image": "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/finmonitor-frontend:latest",
+      "portMappings": [
+        {
+          "containerPort": 80,
+          "protocol": "tcp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/finmonitor",
+          "awslogs-region": "${AWS_REGION}",
+          "awslogs-stream-prefix": "frontend"
+        }
+      },
+      "essential": true
+    }
+  ]
+}

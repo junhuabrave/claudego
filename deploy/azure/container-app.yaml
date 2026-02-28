@@ -1,0 +1,33 @@
+# Azure Container Apps deployment
+# Deploy with: az containerapp create --yaml container-app.yaml
+type: Microsoft.App/containerApps
+location: eastus
+properties:
+  managedEnvironmentId: /subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.App/managedEnvironments/finmonitor-env
+  configuration:
+    ingress:
+      external: true
+      targetPort: 8000
+      transport: auto
+    secrets:
+      - name: database-url
+        value: ${DATABASE_URL}
+      - name: finnhub-api-key
+        value: ${FINNHUB_API_KEY}
+  template:
+    containers:
+      - name: backend
+        image: ${ACR_NAME}.azurecr.io/finmonitor-backend:latest
+        resources:
+          cpu: 0.5
+          memory: 1Gi
+        env:
+          - name: DATABASE_URL
+            secretRef: database-url
+          - name: FINNHUB_API_KEY
+            secretRef: finnhub-api-key
+          - name: APP_ENV
+            value: production
+    scale:
+      minReplicas: 0
+      maxReplicas: 3
