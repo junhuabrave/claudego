@@ -1,7 +1,7 @@
 # AWS Deployment Guide — Financial Markets Monitor
 
 > End-to-end walkthrough for deploying the full stack to AWS ECS Fargate.
-> Tested with AWS CLI v2, Docker Desktop, us-east-1.
+> **Battle-tested:** every issue section below is a real problem encountered during the first deployment — not hypothetical.
 
 ---
 
@@ -22,7 +22,7 @@ ECS Fargate Task  (awsvpc networking)
          └── connects to ──►  RDS PostgreSQL  (private subnet, port 5432)
 ```
 
-**Key insight — shared localhost:** In ECS `awsvpc` mode, all containers inside the same task share the same network namespace. That means the nginx container can reach the FastAPI backend at `http://localhost:8000` without any service discovery or DNS tricks.
+**Key insight — shared localhost:** In ECS `awsvpc` mode, all containers inside the same task share the same network namespace. The nginx container can reach the FastAPI backend at `http://localhost:8000` — no service discovery or DNS needed. This is different from Docker Compose, where containers talk to each other by service name (e.g. `http://backend:8000`).
 
 ---
 
@@ -31,7 +31,8 @@ ECS Fargate Task  (awsvpc networking)
 | Tool | Version | Install |
 |------|---------|---------|
 | AWS CLI | v2 | `brew install awscli` |
-| Docker Desktop | latest | `brew install --cask docker` |
+| Colima + Docker CLI | latest | see Step 1 — do NOT use `brew install --cask docker` |
+| docker-buildx | latest | `brew install docker-buildx` |
 | jq | any | `brew install jq` |
 
 > **AWS credentials** must be configured (`aws configure` or environment variables).
@@ -49,18 +50,41 @@ Copy and paste these into your terminal. Every subsequent command uses them.
 export AWS_REGION="us-east-1"
 export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
 export APP="finmonitor"
+export ECR_BASE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 ```
 
 ---
 
-### Step 1 — Install & start Docker Desktop
+### Step 1 — Install Docker (use Colima, not Docker Desktop)
+
+> **Why Colima?** `brew install --cask docker` (Docker Desktop) requires `sudo` to create `/usr/local/cli-plugins` during install. In a non-interactive terminal it silently fails. Colima is a lightweight VM-based Docker runtime that installs without sudo and works identically for building and pushing images.
 
 ```bash
-brew install --cask docker
-open -a Docker          # start the GUI app
-# wait ~30 s until the Docker menu-bar icon stops animating
-docker info             # should print server info, not an error
+brew install colima docker docker-buildx
+
+# Start the VM (2 CPU / 4 GB RAM is enough for building these images)
+colima start --cpu 2 --memory 4
+
+# Link the buildx plugin so `docker buildx` works
+mkdir -p ~/.docker/cli-plugins
+ln -sf /opt/homebrew/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
+
+# Verify
+docker info       # should show Server Version
+docker buildx version
 ```
+
+> **If you see `docker-credential-desktop: executable file not found`:**
+> Docker's config file still references the Docker Desktop credential helper.
+> Fix it by removing the `credsStore` entry:
+> ```bash
+> cat > ~/.docker/config.json << 'EOF'
+> {
+>   "auths": {},
+>   "currentContext": "colima"
+> }
+> EOF
+> ```
 
 ---
 
@@ -73,16 +97,11 @@ aws ecr create-repository --repository-name ${APP}-backend  --region $AWS_REGION
 aws ecr create-repository --repository-name ${APP}-frontend --region $AWS_REGION
 ```
 
-Save the registry URL for later:
-```bash
-export ECR_BASE="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-```
-
 ---
 
 ### Step 3 — Create CloudWatch log group
 
-ECS will stream container stdout/stderr here.
+ECS streams container stdout/stderr here. Check this first when a task fails to start.
 
 ```bash
 aws logs create-log-group --log-group-name /ecs/${APP} --region $AWS_REGION
@@ -90,21 +109,26 @@ aws logs create-log-group --log-group-name /ecs/${APP} --region $AWS_REGION
 
 ---
 
-### Step 4 — Networking — get VPC & subnets
+### Step 4 — Get default VPC & subnets
 
-We reuse the **default VPC** (every AWS account has one). Grab its ID and two of its public subnets.
+We reuse the **default VPC** (every AWS account has one).
 
 ```bash
 export VPC_ID=$(aws ec2 describe-vpcs \
   --filters "Name=isDefault,Values=true" \
   --query "Vpcs[0].VpcId" --output text)
 
+# Get all public subnets — we'll use two for the ALB
 export SUBNET_IDS=$(aws ec2 describe-subnets \
   --filters "Name=vpc-id,Values=$VPC_ID" "Name=map-public-ip-on-launch,Values=true" \
   --query "Subnets[*].SubnetId" --output text | tr '\t' ',')
 
 echo "VPC: $VPC_ID"
 echo "Subnets: $SUBNET_IDS"
+
+# Pick the first two for ALB (store separately — the ALB CLI needs space-separated, not comma)
+export SUBNET_A=$(echo $SUBNET_IDS | cut -d, -f1)
+export SUBNET_B=$(echo $SUBNET_IDS | cut -d, -f2)
 ```
 
 ---
@@ -124,7 +148,7 @@ export ALB_SG=$(aws ec2 create-security-group \
 aws ec2 authorize-security-group-ingress \
   --group-id $ALB_SG --protocol tcp --port 80 --cidr 0.0.0.0/0
 
-# 2. ECS tasks — accept traffic from the ALB only
+# 2. ECS tasks — accept traffic only from the ALB
 export ECS_SG=$(aws ec2 create-security-group \
   --group-name ${APP}-ecs-sg \
   --description "Allow traffic from ALB to ECS tasks" \
@@ -132,14 +156,11 @@ export ECS_SG=$(aws ec2 create-security-group \
   --query GroupId --output text)
 
 aws ec2 authorize-security-group-ingress \
-  --group-id $ECS_SG --protocol tcp --port 80 \
-  --source-group $ALB_SG
+  --group-id $ECS_SG --protocol tcp --port 80 --source-group $ALB_SG
+aws ec2 authorize-security-group-ingress \
+  --group-id $ECS_SG --protocol tcp --port 8000 --source-group $ALB_SG
 
-# Allow all outbound (so the backend can call Finnhub, etc.)
-aws ec2 authorize-security-group-egress \
-  --group-id $ECS_SG --protocol -1 --port -1 --cidr 0.0.0.0/0 2>/dev/null || true
-
-# 3. RDS — accept Postgres from ECS tasks only
+# 3. RDS — accepts Postgres only from ECS tasks
 export RDS_SG=$(aws ec2 create-security-group \
   --group-name ${APP}-rds-sg \
   --description "Allow Postgres from ECS" \
@@ -147,8 +168,7 @@ export RDS_SG=$(aws ec2 create-security-group \
   --query GroupId --output text)
 
 aws ec2 authorize-security-group-ingress \
-  --group-id $RDS_SG --protocol tcp --port 5432 \
-  --source-group $ECS_SG
+  --group-id $RDS_SG --protocol tcp --port 5432 --source-group $ECS_SG
 
 echo "ALB SG: $ALB_SG | ECS SG: $ECS_SG | RDS SG: $RDS_SG"
 ```
@@ -157,27 +177,26 @@ echo "ALB SG: $ALB_SG | ECS SG: $ECS_SG | RDS SG: $RDS_SG"
 
 ### Step 6 — Create RDS PostgreSQL
 
-#### 6a. DB subnet group (required by RDS)
+#### 6a. DB subnet group (required by RDS — must span ≥ 2 AZs)
 ```bash
-SUBNET_LIST=$(echo $SUBNET_IDS | tr ',' ' ')
 aws rds create-db-subnet-group \
   --db-subnet-group-name ${APP}-subnet-group \
   --db-subnet-group-description "Subnets for finmonitor RDS" \
-  --subnet-ids $SUBNET_LIST
+  --subnet-ids $SUBNET_A $SUBNET_B
 ```
 
 #### 6b. Launch the instance
-> **Why `db.t3.micro`?** It's free-tier eligible and sufficient for dev/staging. Upgrade to `db.t3.small` or larger for production load.
+> **Why `db.t3.micro`?** Free-tier eligible. Sufficient for dev/staging. Upgrade to `db.t3.small` or larger for production load.
 
 ```bash
-export DB_PASSWORD="$(openssl rand -base64 24 | tr -d '=+/')"
-echo "DB password (save this!): $DB_PASSWORD"
+export DB_PASSWORD="$(openssl rand -base64 18 | tr -d '=+/')"
+echo "DB password (save this now!): $DB_PASSWORD"
 
 aws rds create-db-instance \
   --db-instance-identifier ${APP}-db \
   --db-instance-class db.t3.micro \
   --engine postgres \
-  --engine-version 15.7 \
+  --engine-version 15 \
   --master-username postgres \
   --master-user-password "$DB_PASSWORD" \
   --db-name finmonitor \
@@ -190,8 +209,9 @@ aws rds create-db-instance \
 
 #### 6c. Wait for it to be ready (~5–10 min)
 ```bash
-echo "Waiting for RDS... (this takes ~5–10 minutes)"
+echo "Waiting for RDS... (~5–10 minutes)"
 aws rds wait db-instance-available --db-instance-identifier ${APP}-db
+
 export RDS_ENDPOINT=$(aws rds describe-db-instances \
   --db-instance-identifier ${APP}-db \
   --query "DBInstances[0].Endpoint.Address" --output text)
@@ -202,10 +222,9 @@ echo "RDS endpoint: $RDS_ENDPOINT"
 
 ### Step 7 — Store secrets in AWS Secrets Manager
 
-Never bake secrets into Docker images or task definitions. We store them in Secrets Manager and reference them by ARN in the task definition.
+Never bake secrets into Docker images or task definitions. Store them here and reference by ARN.
 
 ```bash
-# Grab the Finnhub key from the local .env
 export FINNHUB_KEY=$(grep FINNHUB_API_KEY backend/.env | cut -d= -f2)
 
 export SECRET_ARN=$(aws secretsmanager create-secret \
@@ -221,57 +240,44 @@ export SECRET_ARN=$(aws secretsmanager create-secret \
 echo "Secret ARN: $SECRET_ARN"
 ```
 
-> `cors_origins` is set to `["*"]` initially. We'll tighten it to the ALB URL after we know it.
+> `cors_origins` is `["*"]` for now. Once you know your ALB DNS name, tighten it:
+> ```bash
+> aws secretsmanager update-secret --secret-id $SECRET_ARN \
+>   --secret-string "{..., \"cors_origins\": \"[\\\"http://${ALB_DNS}\\\"]\"}"
+> aws ecs update-service --cluster $APP --service ${APP}-service --force-new-deployment
+> ```
 
 ---
 
 ### Step 8 — Create IAM roles
 
-ECS needs two IAM roles:
-- **Execution role** — used by the ECS agent to pull images from ECR and read secrets.
-- **Task role** — used by your application code at runtime (add permissions here if your app calls S3, SQS, etc.).
+ECS needs two roles:
+- **Execution role** — used by the ECS agent to pull ECR images and read Secrets Manager.
+- **Task role** — used by your app code at runtime. Add permissions here if the app needs S3, SQS, etc.
 
 ```bash
-# --- Execution Role ---
+# Execution role
 aws iam create-role \
   --role-name ${APP}-execution-role \
-  --assume-role-policy-document '{
-    "Version":"2012-10-17",
-    "Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]
-  }'
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
 aws iam attach-role-policy \
   --role-name ${APP}-execution-role \
   --policy-arn arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
-# Allow reading the specific Secrets Manager secret
 aws iam put-role-policy \
   --role-name ${APP}-execution-role \
   --policy-name SecretsManagerRead \
-  --policy-document "{
-    \"Version\":\"2012-10-17\",
-    \"Statement\":[{
-      \"Effect\":\"Allow\",
-      \"Action\":[\"secretsmanager:GetSecretValue\"],
-      \"Resource\":\"${SECRET_ARN}\"
-    }]
-  }"
+  --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"secretsmanager:GetSecretValue\"],\"Resource\":\"${SECRET_ARN}\"}]}"
 
-export EXEC_ROLE_ARN=$(aws iam get-role \
-  --role-name ${APP}-execution-role \
-  --query Role.Arn --output text)
+export EXEC_ROLE_ARN=$(aws iam get-role --role-name ${APP}-execution-role --query Role.Arn --output text)
 
-# --- Task Role (minimal for now) ---
+# Task role
 aws iam create-role \
   --role-name ${APP}-task-role \
-  --assume-role-policy-document '{
-    "Version":"2012-10-17",
-    "Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]
-  }'
+  --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ecs-tasks.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
 
-export TASK_ROLE_ARN=$(aws iam get-role \
-  --role-name ${APP}-task-role \
-  --query Role.Arn --output text)
+export TASK_ROLE_ARN=$(aws iam get-role --role-name ${APP}-task-role --query Role.Arn --output text)
 
 echo "Exec role: $EXEC_ROLE_ARN"
 echo "Task role: $TASK_ROLE_ARN"
@@ -279,35 +285,9 @@ echo "Task role: $TASK_ROLE_ARN"
 
 ---
 
-### Step 9 — Code changes before building
+### Step 9 — Build & push Docker images
 
-Two small fixes are required for the containers to work correctly in ECS (they differ from the local Docker Compose setup):
-
-#### 9a. `frontend/nginx.conf` — use `localhost` not `backend`
-In Docker Compose, `backend` resolves via Docker's internal DNS.
-In ECS `awsvpc` mode, containers share localhost — so we change the proxy target:
-
-```bash
-sed -i '' 's|http://backend:8000|http://localhost:8000|g' frontend/nginx.conf
-```
-
-#### 9b. `frontend/src/hooks/useWebSocket.ts` — dynamic WebSocket URL
-The WS URL must be derived from the browser's current host (the ALB URL) at runtime,
-because we don't know it at Docker build time:
-
-The line:
-```ts
-const WS_URL = process.env.REACT_APP_WS_URL || "ws://localhost:8000/api/ws";
-```
-becomes:
-```ts
-const WS_URL = process.env.REACT_APP_WS_URL ||
-  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ws`;
-```
-
----
-
-### Step 10 — Build & push Docker images
+> **Important:** Use `docker buildx build --platform linux/amd64 --load` for cross-platform builds on Apple Silicon (M1/M2/M3). Plain `docker build --platform linux/amd64` with multi-stage Dockerfiles fails with a content digest error on ARM Macs. See Issues section below.
 
 ```bash
 # Authenticate Docker to ECR
@@ -315,38 +295,40 @@ aws ecr get-login-password --region $AWS_REGION | \
   docker login --username AWS --password-stdin $ECR_BASE
 
 # Backend
-docker build -t ${APP}-backend ./backend
-docker tag ${APP}-backend:latest ${ECR_BASE}/${APP}-backend:latest
+docker buildx build --platform linux/amd64 --load \
+  -t ${ECR_BASE}/${APP}-backend:latest ./backend
 docker push ${ECR_BASE}/${APP}-backend:latest
 
-# Frontend — pass REACT_APP_API_URL=/api so it uses nginx as the proxy
-docker build \
+# Frontend — REACT_APP_API_URL=/api makes all API calls relative,
+# so nginx can proxy them to the backend on localhost:8000
+docker buildx build --platform linux/amd64 --load \
   --build-arg REACT_APP_API_URL=/api \
-  -t ${APP}-frontend ./frontend
-docker tag ${APP}-frontend:latest ${ECR_BASE}/${APP}-frontend:latest
+  -t ${ECR_BASE}/${APP}-frontend:latest ./frontend
 docker push ${ECR_BASE}/${APP}-frontend:latest
 ```
 
 ---
 
-### Step 11 — Create ECS cluster
+### Step 10 — Create ECS cluster
 
 ```bash
-aws ecs create-cluster --cluster-name $APP
+aws ecs create-cluster --cluster-name $APP --region $AWS_REGION
 ```
 
 ---
 
-### Step 12 — Create the Application Load Balancer
+### Step 11 — Create Application Load Balancer
 
-#### 12a. Create ALB
+> **Important:** Pass `--subnets` as space-separated arguments, not a comma-separated string. `--subnets "id1,id2"` or `--subnets "id1 id2"` will fail with `InvalidSubnet`. Correct form is `--subnets id1 id2`.
+
 ```bash
 export ALB_ARN=$(aws elbv2 create-load-balancer \
   --name ${APP}-alb \
-  --subnets $(echo $SUBNET_IDS | tr ',' ' ') \
+  --subnets $SUBNET_A $SUBNET_B \
   --security-groups $ALB_SG \
   --scheme internet-facing \
   --type application \
+  --region $AWS_REGION \
   --query "LoadBalancers[0].LoadBalancerArn" --output text)
 
 export ALB_DNS=$(aws elbv2 describe-load-balancers \
@@ -354,10 +336,8 @@ export ALB_DNS=$(aws elbv2 describe-load-balancers \
   --query "LoadBalancers[0].DNSName" --output text)
 
 echo "ALB DNS: $ALB_DNS"
-```
 
-#### 12b. Create target group
-```bash
+# Target group (health check on / — nginx returns 200 for the React app)
 export TG_ARN=$(aws elbv2 create-target-group \
   --name ${APP}-tg \
   --protocol HTTP \
@@ -368,149 +348,351 @@ export TG_ARN=$(aws elbv2 create-target-group \
   --health-check-interval-seconds 30 \
   --healthy-threshold-count 2 \
   --unhealthy-threshold-count 3 \
+  --region $AWS_REGION \
   --query "TargetGroups[0].TargetGroupArn" --output text)
-```
 
-#### 12c. Create listener
-```bash
+# Listener
 aws elbv2 create-listener \
   --load-balancer-arn $ALB_ARN \
-  --protocol HTTP \
-  --port 80 \
-  --default-actions Type=forward,TargetGroupArn=$TG_ARN
+  --protocol HTTP --port 80 \
+  --default-actions Type=forward,TargetGroupArn=$TG_ARN \
+  --region $AWS_REGION
 ```
 
 ---
 
-### Step 13 — Register the ECS task definition
+### Step 12 — Register ECS task definition
+
+> **Important:** Do NOT pass the JSON inline as a shell string — variable expansion and escaping issues cause the registration to silently succeed but produce an empty task definition list. Always write the JSON to a file and use `file://`.
 
 ```bash
-aws ecs register-task-definition --cli-input-json "{
-  \"family\": \"${APP}\",
-  \"networkMode\": \"awsvpc\",
-  \"requiresCompatibilities\": [\"FARGATE\"],
-  \"cpu\": \"512\",
-  \"memory\": \"1024\",
-  \"executionRoleArn\": \"${EXEC_ROLE_ARN}\",
-  \"taskRoleArn\": \"${TASK_ROLE_ARN}\",
-  \"containerDefinitions\": [
+cat > /tmp/${APP}-taskdef.json << EOF
+{
+  "family": "${APP}",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "${EXEC_ROLE_ARN}",
+  "taskRoleArn": "${TASK_ROLE_ARN}",
+  "containerDefinitions": [
     {
-      \"name\": \"backend\",
-      \"image\": \"${ECR_BASE}/${APP}-backend:latest\",
-      \"essential\": true,
-      \"portMappings\": [{\"containerPort\": 8000, \"protocol\": \"tcp\"}],
-      \"secrets\": [
-        {\"name\": \"DATABASE_URL\",    \"valueFrom\": \"${SECRET_ARN}:database_url::\"},
-        {\"name\": \"FINNHUB_API_KEY\", \"valueFrom\": \"${SECRET_ARN}:finnhub_api_key::\"},
-        {\"name\": \"CORS_ORIGINS\",    \"valueFrom\": \"${SECRET_ARN}:cors_origins::\"}
+      "name": "backend",
+      "image": "${ECR_BASE}/${APP}-backend:latest",
+      "essential": true,
+      "portMappings": [{"containerPort": 8000, "protocol": "tcp"}],
+      "secrets": [
+        {"name": "DATABASE_URL",    "valueFrom": "${SECRET_ARN}:database_url::"},
+        {"name": "FINNHUB_API_KEY", "valueFrom": "${SECRET_ARN}:finnhub_api_key::"},
+        {"name": "CORS_ORIGINS",    "valueFrom": "${SECRET_ARN}:cors_origins::"}
       ],
-      \"environment\": [
-        {\"name\": \"APP_ENV\",   \"value\": \"production\"},
-        {\"name\": \"LOG_LEVEL\", \"value\": \"WARNING\"}
+      "environment": [
+        {"name": "APP_ENV",   "value": "production"},
+        {"name": "LOG_LEVEL", "value": "WARNING"}
       ],
-      \"logConfiguration\": {
-        \"logDriver\": \"awslogs\",
-        \"options\": {
-          \"awslogs-group\":         \"/ecs/${APP}\",
-          \"awslogs-region\":        \"${AWS_REGION}\",
-          \"awslogs-stream-prefix\": \"backend\"
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/${APP}",
+          "awslogs-region":        "${AWS_REGION}",
+          "awslogs-stream-prefix": "backend"
         }
       }
     },
     {
-      \"name\": \"frontend\",
-      \"image\": \"${ECR_BASE}/${APP}-frontend:latest\",
-      \"essential\": true,
-      \"portMappings\": [{\"containerPort\": 80, \"protocol\": \"tcp\"}],
-      \"dependsOn\": [{\"containerName\": \"backend\", \"condition\": \"START\"}],
-      \"logConfiguration\": {
-        \"logDriver\": \"awslogs\",
-        \"options\": {
-          \"awslogs-group\":         \"/ecs/${APP}\",
-          \"awslogs-region\":        \"${AWS_REGION}\",
-          \"awslogs-stream-prefix\": \"frontend\"
+      "name": "frontend",
+      "image": "${ECR_BASE}/${APP}-frontend:latest",
+      "essential": true,
+      "portMappings": [{"containerPort": 80, "protocol": "tcp"}],
+      "dependsOn": [{"containerName": "backend", "condition": "START"}],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group":         "/ecs/${APP}",
+          "awslogs-region":        "${AWS_REGION}",
+          "awslogs-stream-prefix": "frontend"
         }
       }
     }
   ]
-}"
+}
+EOF
+
+aws ecs register-task-definition \
+  --region $AWS_REGION \
+  --cli-input-json file:///tmp/${APP}-taskdef.json \
+  --query "taskDefinition.{arn:taskDefinitionArn,revision:revision}" \
+  --output table
 ```
 
 ---
 
-### Step 14 — Create ECS service
+### Step 13 — Create ECS service
 
 ```bash
 aws ecs create-service \
   --cluster $APP \
   --service-name ${APP}-service \
-  --task-definition $APP \
+  --task-definition ${APP}:1 \
   --desired-count 1 \
   --launch-type FARGATE \
-  --network-configuration "awsvpcConfiguration={
-    subnets=[$(echo $SUBNET_IDS | sed 's/,/,/g')],
-    securityGroups=[$ECS_SG],
-    assignPublicIp=ENABLED
-  }" \
-  --load-balancers "targetGroupArn=${TG_ARN},containerName=frontend,containerPort=80"
+  --network-configuration "awsvpcConfiguration={subnets=[${SUBNET_A},${SUBNET_B}],securityGroups=[${ECS_SG}],assignPublicIp=ENABLED}" \
+  --load-balancers "targetGroupArn=${TG_ARN},containerName=frontend,containerPort=80" \
+  --region $AWS_REGION \
+  --query "service.{status:status,desired:desiredCount}"
 ```
 
 ---
 
-### Step 15 — Wait & verify
+### Step 14 — Wait & verify
 
 ```bash
 echo "Waiting for ECS service to stabilize (~3–5 min)..."
 aws ecs wait services-stable \
   --cluster $APP \
-  --services ${APP}-service
+  --services ${APP}-service \
+  --region $AWS_REGION
 
-echo "✅ Service is stable!"
+echo "Service is stable!"
 echo "App URL: http://${ALB_DNS}"
-curl -s "http://${ALB_DNS}/api/health"
-# Expected: {"status":"ok"}
+
+# Smoke test — the backend has no /api/health route, use /api/tickers instead
+curl -s "http://${ALB_DNS}/api/tickers"
+# Expected: [] (empty array — no tickers added yet, but 200 means everything is wired up)
 ```
 
-Open `http://<ALB_DNS>` in your browser — the dashboard should load with news and prices.
+Open `http://<ALB_DNS>` in your browser — the dashboard loads with news and prices.
 
 ---
 
 ## Re-deploy after code changes
 
 ```bash
-# Rebuild & push
-docker build -t ${APP}-backend ./backend
-docker tag ${APP}-backend:latest ${ECR_BASE}/${APP}-backend:latest
+# Rebuild & push (use the same buildx command as Step 9)
+docker buildx build --platform linux/amd64 --load \
+  -t ${ECR_BASE}/${APP}-backend:latest ./backend
 docker push ${ECR_BASE}/${APP}-backend:latest
 
-# Force new deployment (ECS will pull the new :latest image)
+# Force ECS to pull the new :latest image with a rolling update
 aws ecs update-service \
   --cluster $APP \
   --service ${APP}-service \
-  --force-new-deployment
+  --force-new-deployment \
+  --region $AWS_REGION
 ```
 
-This is also what `deploy/aws/deploy.sh` does — it builds, pushes, and triggers a rolling update.
+This is also what `deploy/aws/deploy.sh` does — build, push, rolling update.
+
+---
+
+## Issues Encountered & Fixes
+
+These are real problems that came up during the first deployment of this app. Read before you start.
+
+---
+
+### Issue 1: `brew install --cask docker` fails silently without sudo
+
+**Symptom:**
+```
+Error: Failure while executing; `/usr/bin/sudo -E -- mkdir -p -- /usr/local/cli-plugins` exited with 1.
+sudo: a terminal is required to read the password
+```
+Docker Desktop is installed and then immediately rolled back without error in the terminal output you are watching.
+
+**Root cause:** Docker Desktop's post-install script needs `sudo` to create `/usr/local/cli-plugins`. In a non-interactive shell (or any automated context) it cannot prompt for a password, so it fails.
+
+**Fix:** Use Colima instead. Same Docker CLI and daemon, no sudo required:
+```bash
+brew install colima docker
+colima start --cpu 2 --memory 4
+```
+
+---
+
+### Issue 2: `docker-credential-desktop: executable file not found`
+
+**Symptom:** After installing Colima, every `docker push` or `docker login` fails with:
+```
+error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH
+```
+
+**Root cause:** A previous Docker Desktop install (even a failed/partial one) wrote `"credsStore": "desktop"` to `~/.docker/config.json`. Colima doesn't ship this helper.
+
+**Fix:** Remove the `credsStore` entry from Docker config:
+```bash
+cat > ~/.docker/config.json << 'EOF'
+{
+  "auths": {},
+  "currentContext": "colima"
+}
+EOF
+```
+Then re-run `aws ecr get-login-password ... | docker login ...`.
+
+---
+
+### Issue 3: `docker build --platform linux/amd64` fails on Apple Silicon with multi-stage Dockerfiles
+
+**Symptom:**
+```
+failed to export image: NotFound: content digest sha256:...: not found
+```
+The build stage completes successfully but the export step fails.
+
+**Root cause:** On ARM Macs (M1/M2/M3), plain `docker build --platform linux/amd64` uses QEMU emulation for cross-platform builds. Multi-stage builds can lose content references across stages when using the legacy builder.
+
+**Fix:** Use `docker buildx build` with `--load`:
+```bash
+# Install buildx first
+brew install docker-buildx
+mkdir -p ~/.docker/cli-plugins
+ln -sf /opt/homebrew/opt/docker-buildx/bin/docker-buildx ~/.docker/cli-plugins/docker-buildx
+
+# Then use:
+docker buildx build --platform linux/amd64 --load -t myimage ./mydir
+```
+The `--load` flag writes the result back into the local Docker image store so you can tag and push it.
+
+---
+
+### Issue 4: `npm install` in Dockerfile fails with peer dependency conflicts
+
+**Symptom:** Frontend Docker build fails:
+```
+npm error code ERESOLVE
+npm error ERESOLVE unable to resolve dependency tree
+```
+
+**Root cause:** `react-scripts@5` has peer dependency conflicts with React 18 and some MUI packages. The `npm install` default resolver is strict.
+
+**Fix:** Add `--legacy-peer-deps` to `npm install` in `frontend/Dockerfile`:
+```dockerfile
+# Before
+RUN npm install
+
+# After
+COPY package.json package-lock.json ./
+RUN npm install --legacy-peer-deps
+```
+Also copy `package-lock.json` alongside `package.json` for deterministic installs.
+
+---
+
+### Issue 5: ALB `--subnets` argument rejects comma or space-in-string formats
+
+**Symptom:**
+```
+An error occurred (InvalidSubnet) when calling the CreateLoadBalancer operation:
+The subnet ID 'subnet-xxx subnet-yyy' is not valid
+```
+
+**Root cause:** The AWS CLI `--subnets` parameter for `elbv2 create-load-balancer` must receive subnet IDs as separate positional values, not as a single comma-separated or space-separated string.
+
+**Fix:** Pass subnets as separate arguments, not quoted together:
+```bash
+# Wrong
+--subnets "subnet-aaa,subnet-bbb"
+--subnets "subnet-aaa subnet-bbb"
+
+# Correct
+--subnets subnet-aaa subnet-bbb
+# or using variables:
+--subnets $SUBNET_A $SUBNET_B
+```
+
+---
+
+### Issue 6: `aws ecs register-task-definition` with inline JSON silently registers nothing
+
+**Symptom:** The command exits 0 (success), but `aws ecs list-task-definitions` returns an empty list.
+
+**Root cause:** Passing a large JSON blob with embedded shell variable interpolation directly in `--cli-input-json "..."` is fragile. Shell escaping of nested quotes causes the JSON to be malformed in a way the AWS CLI accepts but ignores.
+
+**Fix:** Write the JSON to a temp file with a heredoc (shell does variable expansion correctly), then point the CLI at the file:
+```bash
+cat > /tmp/taskdef.json << EOF
+{ ... your JSON with $VARIABLES expanded ... }
+EOF
+
+aws ecs register-task-definition --cli-input-json file:///tmp/taskdef.json
+```
+
+---
+
+### Issue 7: nginx proxy uses `backend` hostname — works in Docker Compose, breaks in ECS
+
+**Symptom:** ECS task starts but all API calls from the browser return 502 or connection refused. Backend logs show the FastAPI process is running on port 8000 but nginx can't reach it.
+
+**Root cause:** `frontend/nginx.conf` had:
+```
+proxy_pass http://backend:8000/api/;
+```
+In Docker Compose, `backend` is a valid hostname resolved by Docker's internal DNS. In ECS `awsvpc` mode, containers in the same task share `localhost` — there is no `backend` hostname.
+
+**Fix:** Change the proxy target to `localhost`:
+```nginx
+proxy_pass http://localhost:8000/api/;
+```
+
+---
+
+### Issue 8: Hard-coded WebSocket URL points to localhost in production
+
+**Symptom:** Browser console shows WebSocket connection failed to `ws://localhost:8000/api/ws` even when visiting the ALB URL.
+
+**Root cause:** `useWebSocket.ts` had a hard-coded fallback:
+```ts
+const WS_URL = process.env.REACT_APP_WS_URL || "ws://localhost:8000/api/ws";
+```
+`REACT_APP_WS_URL` wasn't set at build time (the ALB URL isn't known until after deployment), so the browser tried to connect to `localhost` instead of the ALB.
+
+**Fix:** Derive the WS URL dynamically from the browser's current host at runtime:
+```ts
+const WS_URL = process.env.REACT_APP_WS_URL ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ws`;
+```
+nginx already forwards WebSocket upgrades (`Upgrade` header is set in `nginx.conf`), so this works transparently.
+
+---
+
+### Issue 9: News articles fetched but never saved — silent rollback due to datetime serialization
+
+**Symptom:** Backend logs show Finnhub API returning 200 and SQL `INSERT` statements, but `GET /api/news` returns `[]`. The scheduler logs show `Error polling news` every minute.
+
+**Root cause (two-part):**
+1. The article dict built in `finnhub_provider.py` contains `published_at` as a Python `datetime` object.
+2. `scheduler.py` calls `ws_manager.broadcast("news", article)` *inside* the `async with async_session()` block. The broadcast does `json.dumps(article)`, which raises `TypeError: Object of type datetime is not JSON serializable`. This exception propagates back through the session context manager, causing a **rollback** before `session.commit()` is reached. Articles are inserted but never committed.
+
+**Fix:** Add a custom JSON encoder to `websocket_manager.py` that serialises `datetime` objects to ISO 8601 strings:
+```python
+class _DatetimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+# Then use it in broadcast():
+payload = json.dumps({"type": message_type, "data": data}, cls=_DatetimeEncoder)
+```
 
 ---
 
 ## Useful commands
 
 ```bash
-# View running tasks
-aws ecs list-tasks --cluster $APP
-
-# View logs (backend)
-aws logs tail /ecs/finmonitor --filter-pattern "backend" --follow
-
-# Describe service health
-aws ecs describe-services --cluster $APP --services ${APP}-service \
+# Check service health
+aws ecs describe-services --cluster $APP --services ${APP}-service --region $AWS_REGION \
   --query "services[0].{status:status,running:runningCount,desired:desiredCount}"
 
-# SSH-like exec into a running container (requires ECS Exec enabled)
-aws ecs execute-command --cluster $APP \
-  --task <task-id> --container backend \
-  --interactive --command "/bin/bash"
+# Stream live logs
+aws logs tail /ecs/finmonitor --follow --region $AWS_REGION
+
+# List running tasks
+aws ecs list-tasks --cluster $APP --region $AWS_REGION
+
+# Smoke test API
+curl http://${ALB_DNS}/api/tickers   # [] = healthy, error = something wrong
 ```
 
 ---
@@ -518,45 +700,31 @@ aws ecs execute-command --cluster $APP \
 ## Teardown (avoid ongoing charges)
 
 ```bash
-# Scale down service
-aws ecs update-service --cluster $APP --service ${APP}-service --desired-count 0
-
-# Delete service
-aws ecs delete-service --cluster $APP --service ${APP}-service --force
-
-# Delete RDS (takes a few minutes)
-aws rds delete-db-instance \
-  --db-instance-identifier ${APP}-db \
-  --skip-final-snapshot
-
-# Delete ALB + target group
+aws ecs update-service --cluster $APP --service ${APP}-service --desired-count 0 --region $AWS_REGION
+aws ecs delete-service --cluster $APP --service ${APP}-service --force --region $AWS_REGION
+aws rds delete-db-instance --db-instance-identifier ${APP}-db --skip-final-snapshot
 aws elbv2 delete-load-balancer --load-balancer-arn $ALB_ARN
 aws elbv2 delete-target-group --target-group-arn $TG_ARN
-
-# Delete ECR repos
 aws ecr delete-repository --repository-name ${APP}-backend --force
 aws ecr delete-repository --repository-name ${APP}-frontend --force
-
-# Delete secrets
 aws secretsmanager delete-secret --secret-id ${APP}/config --force-delete-without-recovery
-
-# Delete security groups (must delete in order: ECS → RDS → ALB)
+# Security groups — delete in this order (ECS first, then RDS, then ALB)
 aws ec2 delete-security-group --group-id $ECS_SG
 aws ec2 delete-security-group --group-id $RDS_SG
 aws ec2 delete-security-group --group-id $ALB_SG
-
-# Delete ECS cluster
-aws ecs delete-cluster --cluster $APP
+aws ecs delete-cluster --cluster $APP --region $AWS_REGION
 ```
 
 ---
 
-## Troubleshooting
+## Quick troubleshooting reference
 
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| Task stops immediately | Missing secret / bad DB URL | Check CloudWatch logs at `/ecs/finmonitor` |
-| ALB returns 502 Bad Gateway | Frontend container not healthy | Ensure nginx is running; check target group health |
-| News feed empty | Finnhub key invalid in Secrets Manager | Update secret, force new deployment |
-| WebSocket not connecting | nginx proxy not forwarding Upgrade header | Check nginx.conf has `proxy_set_header Upgrade $http_upgrade` |
-| `CannotPullContainerError` | ECR auth or wrong image URI | Verify execution role has ECR pull permissions |
+| Task stops immediately | Bad secret / DB URL unreachable | Check CloudWatch: `aws logs tail /ecs/finmonitor --follow` |
+| ALB returns 502 | nginx not healthy or can't reach backend | Confirm nginx.conf uses `localhost:8000`, not `backend:8000` |
+| WebSocket connects to `localhost` | Hard-coded WS URL | Use dynamic `window.location.host` — see Issue 8 |
+| News feed always empty | datetime serialization crash rolls back DB | Add `_DatetimeEncoder` to `websocket_manager.py` — see Issue 9 |
+| `CannotPullContainerError` | ECR auth or wrong image URI | Check execution role has `AmazonECSTaskExecutionRolePolicy` |
+| `npm install` fails in Docker build | Peer dependency conflict | Add `--legacy-peer-deps` to `RUN npm install` in Dockerfile |
+| Task definition registers but list is empty | Inline JSON escaping failure | Write JSON to a file, use `--cli-input-json file:///tmp/...` |
