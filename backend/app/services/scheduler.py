@@ -20,6 +20,8 @@ scheduler = AsyncIOScheduler()
 
 async def poll_news():
     """Fetch latest market news and broadcast new articles."""
+    if not settings.finnhub_api_key:
+        return
     try:
         provider = get_news_provider()
         articles = await provider.fetch_market_news()
@@ -43,6 +45,8 @@ async def poll_news():
 
 async def poll_ipos():
     """Fetch upcoming IPO events for the next 2 weeks."""
+    if not settings.finnhub_api_key:
+        return
     try:
         provider = get_ipo_provider()
         today = datetime.date.today()
@@ -72,7 +76,7 @@ async def poll_quotes():
             )
             symbols = [row[0] for row in result.fetchall()]
 
-        if not symbols:
+        if not symbols or not settings.finnhub_api_key:
             return
 
         provider = get_quote_provider()
