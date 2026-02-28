@@ -678,6 +678,42 @@ payload = json.dumps({"type": message_type, "data": data}, cls=_DatetimeEncoder)
 
 ---
 
+### Issue 10: Chat and API calls fail in production — `.env` leaks into Docker build
+
+**Symptom:** The app loads and shows data, but every chat message returns "Sorry, something went wrong. Please try again." Browser DevTools shows the request going to `http://localhost:8081/api/chat` instead of the ALB URL.
+
+**Root cause:** The `frontend/Dockerfile` did not declare `ARG REACT_APP_API_URL`. Without an explicit `ARG` declaration, Docker silently ignores `--build-arg` values. During `npm run build`, CRA reads environment variables in this priority order: shell env → `.env.local` → `.env`. Since the shell had no `REACT_APP_API_URL` (the arg was silently dropped), CRA used the value from the `.env` file: `http://localhost:8081/api`. This was then hard-coded into the compiled JS bundle, so every browser API call targeted localhost — which doesn't exist in production.
+
+**Fix:** Declare `ARG` + `ENV` in the Dockerfile *before* `RUN npm run build`, with the correct production default:
+```dockerfile
+ARG REACT_APP_API_URL=/api
+ENV REACT_APP_API_URL=$REACT_APP_API_URL
+RUN npm run build
+```
+The `ENV` instruction puts the value into the shell environment, which takes precedence over the `.env` file during the build. Using `/api` as the default means all API calls are relative and proxied by nginx — no ALB URL needed at build time.
+
+**Key lesson:** In a CRA multi-stage Docker build, **every `REACT_APP_*` variable must be explicitly declared with `ARG` + `ENV`**, otherwise any value in `.env` files will silently win.
+
+---
+
+### Issue 11: WebSocket shows "Disconnected" — `REACT_APP_WS_URL` also leaked from `.env`
+
+**Symptom:** After fixing Issue 10, the app works (chat, news, prices) but the status indicator permanently shows **Disconnected**. CloudWatch nginx logs show browser requests for tickers/news/ipos succeeding, but **no WebSocket upgrade request ever arrives at nginx**.
+
+**Root cause:** Same `.env` leak pattern as Issue 10. `frontend/.env` contained `REACT_APP_WS_URL=ws://localhost:8081/api/ws`. Because `REACT_APP_WS_URL` *was* set (to the wrong value), the dynamic runtime fallback added in Issue 8 was never reached — `process.env.REACT_APP_WS_URL || <dynamic>` short-circuits on any truthy value, and a localhost URL is truthy. The browser silently tried to connect to `ws://localhost:8081/api/ws`, failed instantly, and showed Disconnected without logging anything obvious.
+
+**Fix:** Declare the WS URL arg in the Dockerfile with an **empty default**, so the `.env` value is overridden with an empty string. An empty string is falsy in JavaScript, so the dynamic `window.location.host` fallback kicks in:
+```dockerfile
+ARG REACT_APP_WS_URL=
+ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
+```
+
+**How to confirm the bug without redeploying:** Open browser DevTools → Network tab → filter by `WS`. If no WebSocket connection attempt appears, the URL is wrong. If a failed connection to `localhost` appears, you have this bug.
+
+**Key lesson:** Local `.env` files should never be committed with values that only make sense for local development. Consider adding `frontend/.env` to `.gitignore` (keep `.env.example` instead), or add a `frontend/.dockerignore` that excludes `.env` from the Docker build context entirely.
+
+---
+
 ## Useful commands
 
 ```bash
@@ -723,8 +759,10 @@ aws ecs delete-cluster --cluster $APP --region $AWS_REGION
 |---------|-------------|-----|
 | Task stops immediately | Bad secret / DB URL unreachable | Check CloudWatch: `aws logs tail /ecs/finmonitor --follow` |
 | ALB returns 502 | nginx not healthy or can't reach backend | Confirm nginx.conf uses `localhost:8000`, not `backend:8000` |
-| WebSocket connects to `localhost` | Hard-coded WS URL | Use dynamic `window.location.host` — see Issue 8 |
+| WebSocket connects to `localhost` | Hard-coded WS URL fallback | Use dynamic `window.location.host` — see Issue 8 |
 | News feed always empty | datetime serialization crash rolls back DB | Add `_DatetimeEncoder` to `websocket_manager.py` — see Issue 9 |
+| Chat returns "Something went wrong" | `.env` API URL baked into build | Declare `ARG`/`ENV REACT_APP_API_URL=/api` in Dockerfile — see Issue 10 |
+| Status shows "Disconnected" permanently | `.env` WS URL baked into build | Declare `ARG`/`ENV REACT_APP_WS_URL=` (empty) in Dockerfile — see Issue 11 |
 | `CannotPullContainerError` | ECR auth or wrong image URI | Check execution role has `AmazonECSTaskExecutionRolePolicy` |
 | `npm install` fails in Docker build | Peer dependency conflict | Add `--legacy-peer-deps` to `RUN npm install` in Dockerfile |
 | Task definition registers but list is empty | Inline JSON escaping failure | Write JSON to a file, use `--cli-input-json file:///tmp/...` |
