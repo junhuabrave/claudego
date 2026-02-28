@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { WSMessage } from "../types";
 
-const WS_URL = process.env.REACT_APP_WS_URL || "ws://localhost:8000/api/ws";
+const WS_URL = process.env.REACT_APP_WS_URL ||
+  `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/api/ws`;
 
 export function useWebSocket(onMessage: (msg: WSMessage) => void) {
   const [connected, setConnected] = useState(false);
