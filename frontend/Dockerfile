@@ -5,9 +5,11 @@ COPY package.json package-lock.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
 # Default to /api so nginx proxies to the backend on localhost:8000.
-# Override at build time with --build-arg REACT_APP_API_URL=... if needed.
 ARG REACT_APP_API_URL=/api
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
+# Leave WS URL empty so useWebSocket.ts derives it from window.location.host at runtime.
+ARG REACT_APP_WS_URL=
+ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 RUN npm run build
 
 # Serve stage
