@@ -1,5 +1,5 @@
 import axios from "axios";
-import type { ChatResponse, IPOEvent, NewsArticle, Reminder, Ticker } from "../types";
+import type { CandlePoint, ChatResponse, IPOEvent, NewsArticle, Reminder, Ticker } from "../types";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000/api";
 
@@ -31,6 +31,12 @@ export const createReminder = (data: {
 }) => client.post<Reminder>("/reminders", data).then((r) => r.data);
 
 export const deleteReminder = (id: number) => client.delete(`/reminders/${id}`);
+
+// --- Candles ---
+export const getCandles = (symbol: string, resolution = "5", days = 1) =>
+  client
+    .get<CandlePoint[]>(`/candles/${symbol}`, { params: { resolution, days } })
+    .then((r) => r.data);
 
 // --- Chat ---
 export const sendChatMessage = (message: string) =>

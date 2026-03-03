@@ -1,11 +1,14 @@
 """API routes for the financial monitoring system."""
 
 import datetime
+import time
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.models.models import IPOEvent, NewsArticle, Reminder, Ticker
 from app.providers.factory import get_quote_provider
@@ -167,6 +170,63 @@ async def chat(payload: ChatMessage, db: AsyncSession = Depends(get_db)):
         action=parsed["action"],
         ticker=parsed.get("ticker"),
     )
+
+
+# --- Candles ---
+_VALID_RESOLUTIONS = {"1", "5", "15", "30", "60", "D", "W"}
+
+# Map (resolution, days) → yfinance (period, interval)
+_YF_INTERVAL_MAP = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "60m"}
+
+
+def _yf_params(resolution: str, days: int) -> tuple[str, str]:
+    if resolution in _YF_INTERVAL_MAP:
+        return "1d", _YF_INTERVAL_MAP[resolution]
+    if resolution == "D":
+        if days <= 7:
+            return "5d", "1d"
+        if days <= 30:
+            return "1mo", "1d"
+        return "3mo", "1d"
+    # W
+    return "3mo", "1wk"
+
+
+@router.get("/candles/{symbol}")
+async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
+    """Fetch OHLCV candle data via Yahoo Finance (yfinance). No API key required."""
+    import asyncio
+
+    import yfinance as yf
+
+    if resolution not in _VALID_RESOLUTIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid resolution '{resolution}'")
+
+    period, interval = _yf_params(resolution, days)
+
+    try:
+        # yfinance is synchronous — run in thread pool to avoid blocking the event loop
+        ticker = yf.Ticker(symbol.upper())
+        hist = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: ticker.history(period=period, interval=interval)
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if hist is None or hist.empty:
+        return []
+
+    return [
+        {
+            "t": int(ts.timestamp()),
+            "o": round(float(row["Open"]), 4),
+            "h": round(float(row["High"]), 4),
+            "l": round(float(row["Low"]), 4),
+            "c": round(float(row["Close"]), 4),
+            "v": int(row["Volume"]),
+        }
+        for ts, row in hist.iterrows()
+    ]
 
 
 # --- WebSocket ---

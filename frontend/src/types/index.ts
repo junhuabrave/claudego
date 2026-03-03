@@ -52,6 +52,15 @@ export interface ChatResponse {
   ticker: string | null;
 }
 
+export interface CandlePoint {
+  t: number; // Unix timestamp (seconds)
+  o: number; // Open
+  h: number; // High
+  l: number; // Low
+  c: number; // Close
+  v: number; // Volume
+}
+
 export interface WSMessage {
   type: "news" | "quotes" | "ipo_update" | "pong";
   data: Record<string, unknown>;

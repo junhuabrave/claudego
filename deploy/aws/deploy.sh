@@ -21,7 +21,9 @@ docker tag finmonitor-backend:latest "$ECR_BACKEND:latest"
 docker push "$ECR_BACKEND:latest"
 
 echo "=== Building and pushing frontend ==="
-docker build -t finmonitor-frontend ./frontend
+docker build -t finmonitor-frontend ./frontend \
+  --build-arg REACT_APP_API_URL=/api \
+  --build-arg REACT_APP_WS_URL=wss://d1yleiq0s9sk4n.cloudfront.net/api/ws
 docker tag finmonitor-frontend:latest "$ECR_FRONTEND:latest"
 docker push "$ECR_FRONTEND:latest"
 

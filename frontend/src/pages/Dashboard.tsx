@@ -15,6 +15,7 @@ import ChatBox from "../components/ChatBox";
 import IPOCalendar from "../components/IPOCalendar";
 import NewsFeed from "../components/NewsFeed";
 import StatusBar from "../components/StatusBar";
+import StockChartDialog from "../components/StockChartDialog";
 import WatchList from "../components/WatchList";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { getIPOs, getNews, getTickers, removeTicker } from "../services/api";
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [ipos, setIpos] = useState<IPOEvent[]>([]);
   const [rightTab, setRightTab] = useState(0);
+  const [selectedTicker, setSelectedTicker] = useState<Ticker | null>(null);
 
   const loadTickers = useCallback(async () => {
     try {
@@ -115,7 +117,11 @@ export default function Dashboard() {
               <Typography variant="h6" gutterBottom>
                 Watchlist
               </Typography>
-              <WatchList tickers={tickers} onRemove={handleRemoveTicker} />
+              <WatchList
+                tickers={tickers}
+                onRemove={handleRemoveTicker}
+                onSelectSymbol={setSelectedTicker}
+              />
             </Paper>
           </Grid>
 
@@ -149,6 +155,11 @@ export default function Dashboard() {
           </Grid>
         </Grid>
       </Container>
+
+      <StockChartDialog
+        ticker={selectedTicker}
+        onClose={() => setSelectedTicker(null)}
+      />
     </Box>
   );
 }
