@@ -17,7 +17,7 @@ def parse_chat_message(message: str) -> dict:
     text = message.strip().lower()
 
     # Add ticker
-    add_match = re.match(r"(?:add|watch|track|follow)\s+([a-zA-Z]{1,10})", text, re.IGNORECASE)
+    add_match = re.match(r"(?:add|watch|track|follow)\s+(\^?[a-zA-Z0-9][\w.-]{0,14})", text, re.IGNORECASE)
     if add_match:
         ticker = add_match.group(1).upper()
         return {
@@ -28,7 +28,7 @@ def parse_chat_message(message: str) -> dict:
 
     # Remove ticker
     remove_match = re.match(
-        r"(?:remove|delete|unwatch|untrack|unfollow|drop)\s+([a-zA-Z]{1,10})",
+        r"(?:remove|delete|unwatch|untrack|unfollow|drop)\s+(\^?[a-zA-Z0-9][\w.-]{0,14})",
         text,
         re.IGNORECASE,
     )
