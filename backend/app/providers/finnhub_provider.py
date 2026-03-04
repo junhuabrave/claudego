@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import math
 
 import httpx
 import yfinance as yf
@@ -89,9 +90,13 @@ async def _yfinance_quote(symbol: str) -> dict:
         change_pct = ((price - prev) / prev * 100) if prev else 0.0
         return price, change_pct
 
+    def _safe(val: float | None) -> float:
+        """Return 0 for None, nan, or inf — values that break JSON serialization."""
+        return val if (val is not None and math.isfinite(val)) else 0.0
+
     try:
         price, change_pct = await asyncio.get_event_loop().run_in_executor(None, _fetch)
-        return {"symbol": symbol, "price": price or 0, "change_percent": change_pct or 0}
+        return {"symbol": symbol, "price": _safe(price), "change_percent": _safe(change_pct)}
     except Exception:
         return {"symbol": symbol, "price": 0, "change_percent": 0}
 

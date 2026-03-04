@@ -1,6 +1,7 @@
 import datetime
+import math
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 # --- Ticker ---
@@ -21,6 +22,14 @@ class TickerResponse(BaseModel):
     created_at: datetime.datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("last_price", "change_percent", mode="before")
+    @classmethod
+    def sanitize_float(cls, v: float | None) -> float | None:
+        """Replace nan/inf with None — these are not valid JSON and crash serialization."""
+        if v is None:
+            return None
+        return None if not math.isfinite(v) else v
 
 
 # --- News ---
