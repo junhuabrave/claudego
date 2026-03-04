@@ -16,12 +16,12 @@ aws ecr get-login-password --region "$AWS_REGION" | \
   docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 echo "=== Building and pushing backend ==="
-docker build -t finmonitor-backend ./backend
+docker build --platform linux/amd64 -t finmonitor-backend ./backend
 docker tag finmonitor-backend:latest "$ECR_BACKEND:latest"
 docker push "$ECR_BACKEND:latest"
 
 echo "=== Building and pushing frontend ==="
-docker build -t finmonitor-frontend ./frontend \
+docker build --platform linux/amd64 -t finmonitor-frontend ./frontend \
   --build-arg REACT_APP_API_URL=/api \
   --build-arg REACT_APP_WS_URL=wss://d1yleiq0s9sk4n.cloudfront.net/api/ws
 docker tag finmonitor-frontend:latest "$ECR_FRONTEND:latest"

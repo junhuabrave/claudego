@@ -1,11 +1,14 @@
 """Finnhub.io provider for news, quotes, and IPO data."""
 
+import asyncio
 import datetime
 
 import httpx
+import yfinance as yf
 
 from app.core.config import settings
 from app.providers.base import IPOProvider, NewsProvider, QuoteProvider
+from app.providers.symbol_mapper import to_finnhub
 
 BASE_URL = "https://finnhub.io/api/v1"
 
@@ -46,7 +49,7 @@ class FinnhubNewsProvider(NewsProvider):
             resp = await client.get(
                 f"{BASE_URL}/company-news",
                 params={
-                    "symbol": symbol,
+                    "symbol": to_finnhub(symbol),
                     "from": week_ago.isoformat(),
                     "to": today.isoformat(),
                     "token": settings.finnhub_api_key,
@@ -75,20 +78,42 @@ class FinnhubNewsProvider(NewsProvider):
         ]
 
 
+async def _yfinance_quote(symbol: str) -> dict:
+    """Fallback quote fetch via yfinance when Finnhub returns zero price."""
+
+    def _fetch():
+        t = yf.Ticker(symbol)
+        fi = t.fast_info
+        price = fi.last_price
+        prev = fi.previous_close
+        change_pct = ((price - prev) / prev * 100) if prev else 0.0
+        return price, change_pct
+
+    try:
+        price, change_pct = await asyncio.get_event_loop().run_in_executor(None, _fetch)
+        return {"symbol": symbol, "price": price or 0, "change_percent": change_pct or 0}
+    except Exception:
+        return {"symbol": symbol, "price": 0, "change_percent": 0}
+
+
 class FinnhubQuoteProvider(QuoteProvider):
     async def fetch_quote(self, symbol: str) -> dict:
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{BASE_URL}/quote",
-                params={"symbol": symbol, "token": settings.finnhub_api_key},
+                params={"symbol": to_finnhub(symbol), "token": settings.finnhub_api_key},
                 timeout=10,
             )
             resp.raise_for_status()
             data = resp.json()
 
+        price = data.get("c", 0)
+        if not price:
+            return await _yfinance_quote(symbol)
+
         return {
             "symbol": symbol,
-            "price": data.get("c", 0),
+            "price": price,
             "change_percent": data.get("dp", 0),
         }
 
@@ -99,20 +124,24 @@ class FinnhubQuoteProvider(QuoteProvider):
                 try:
                     resp = await client.get(
                         f"{BASE_URL}/quote",
-                        params={"symbol": symbol, "token": settings.finnhub_api_key},
+                        params={"symbol": to_finnhub(symbol), "token": settings.finnhub_api_key},
                         timeout=10,
                     )
                     resp.raise_for_status()
                     data = resp.json()
-                    results.append(
-                        {
-                            "symbol": symbol,
-                            "price": data.get("c", 0),
-                            "change_percent": data.get("dp", 0),
-                        }
-                    )
+                    price = data.get("c", 0)
+                    if price:
+                        results.append(
+                            {
+                                "symbol": symbol,
+                                "price": price,
+                                "change_percent": data.get("dp", 0),
+                            }
+                        )
+                    else:
+                        results.append(await _yfinance_quote(symbol))
                 except httpx.HTTPError:
-                    results.append({"symbol": symbol, "price": None, "change_percent": None})
+                    results.append(await _yfinance_quote(symbol))
         return results
 
 

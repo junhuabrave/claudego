@@ -1,5 +1,7 @@
 """Provider factory - swap implementations via config."""
 
+from app.core.config import settings
+from app.providers.alpha_vantage_provider import AlphaVantageIPOProvider
 from app.providers.base import IPOProvider, NewsProvider, QuoteProvider
 from app.providers.finnhub_provider import (
     FinnhubIPOProvider,
@@ -17,25 +19,23 @@ QUOTE_PROVIDERS: dict[str, type[QuoteProvider]] = {
 }
 
 IPO_PROVIDERS: dict[str, type[IPOProvider]] = {
-    "finnhub": FinnhubIPOProvider,
+    "alphavantage": AlphaVantageIPOProvider,  # free tier, default
+    "finnhub": FinnhubIPOProvider,            # premium only
 }
-
-# Default provider keys - change these or make them config-driven
-_DEFAULT_NEWS = "finnhub"
-_DEFAULT_QUOTE = "finnhub"
-_DEFAULT_IPO = "finnhub"
 
 
 def get_news_provider(name: str | None = None) -> NewsProvider:
-    key = name or _DEFAULT_NEWS
+    key = name or "finnhub"
     return NEWS_PROVIDERS[key]()
 
 
 def get_quote_provider(name: str | None = None) -> QuoteProvider:
-    key = name or _DEFAULT_QUOTE
+    key = name or "finnhub"
     return QUOTE_PROVIDERS[key]()
 
 
 def get_ipo_provider(name: str | None = None) -> IPOProvider:
-    key = name or _DEFAULT_IPO
+    key = name or settings.ipo_provider
+    if key not in IPO_PROVIDERS:
+        raise ValueError(f"Unknown IPO provider '{key}'. Choose from: {list(IPO_PROVIDERS)}")
     return IPO_PROVIDERS[key]()

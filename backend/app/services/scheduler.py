@@ -45,8 +45,6 @@ async def poll_news():
 
 async def poll_ipos():
     """Fetch upcoming IPO events for the next 2 weeks."""
-    if not settings.finnhub_api_key:
-        return
     try:
         provider = get_ipo_provider()
         today = datetime.date.today()
@@ -138,9 +136,10 @@ async def check_reminders():
 
 
 def start_scheduler():
-    scheduler.add_job(poll_news, "interval", seconds=settings.news_poll_interval_seconds, id="poll_news")
-    scheduler.add_job(poll_ipos, "interval", seconds=settings.ipo_poll_interval_seconds, id="poll_ipos")
-    scheduler.add_job(poll_quotes, "interval", seconds=settings.quotes_poll_interval_seconds, id="poll_quotes")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    scheduler.add_job(poll_news, "interval", seconds=settings.news_poll_interval_seconds, id="poll_news", next_run_time=now)
+    scheduler.add_job(poll_ipos, "interval", seconds=settings.ipo_poll_interval_seconds, id="poll_ipos", next_run_time=now)
+    scheduler.add_job(poll_quotes, "interval", seconds=settings.quotes_poll_interval_seconds, id="poll_quotes", next_run_time=now)
     scheduler.add_job(check_reminders, "interval", seconds=300, id="check_reminders")
     scheduler.start()
     logger.info("Scheduler started")
