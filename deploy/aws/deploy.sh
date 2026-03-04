@@ -23,7 +23,8 @@ docker push "$ECR_BACKEND:latest"
 echo "=== Building and pushing frontend ==="
 docker build --platform linux/amd64 -t finmonitor-frontend ./frontend \
   --build-arg REACT_APP_API_URL=/api \
-  --build-arg REACT_APP_WS_URL=wss://d1yleiq0s9sk4n.cloudfront.net/api/ws
+  --build-arg REACT_APP_WS_URL=wss://d1yleiq0s9sk4n.cloudfront.net/api/ws \
+  --build-arg NGINX_CONF=nginx.prod.conf
 docker tag finmonitor-frontend:latest "$ECR_FRONTEND:latest"
 docker push "$ECR_FRONTEND:latest"
 

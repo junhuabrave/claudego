@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    # Provider selection
+    # Choices: "alphavantage" (free, default) | "finnhub" (premium)
+    ipo_provider: str = "alphavantage"
+
     # Scheduler intervals (seconds)
     news_poll_interval_seconds: int = 60
     ipo_poll_interval_seconds: int = 3600

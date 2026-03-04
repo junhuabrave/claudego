@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
 from app.core.config import settings
 from app.core.database import engine, Base
-from app.services.scheduler import start_scheduler, stop_scheduler
+from app.services.scheduler import poll_ipos, start_scheduler, stop_scheduler
 
 logging.basicConfig(level=settings.log_level)
 logger = logging.getLogger(__name__)
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables created")
     start_scheduler()
+    await poll_ipos()  # seed DB immediately; scheduler runs hourly after this
     yield
     # Shutdown
     stop_scheduler()

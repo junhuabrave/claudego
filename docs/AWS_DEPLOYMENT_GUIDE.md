@@ -789,6 +789,49 @@ results.append({
 
 ---
 
+### Issue 15: nginx config shared between local and prod — `backend` hostname crashes ECS
+
+**Symptom:** After fixing local Docker Compose to use the Docker service name as upstream (`proxy_pass http://backend:8000/api/`), ECS task starts but the frontend container immediately exits with code 1. CloudWatch logs show:
+```
+[emerg] 1#1: host not found in upstream "backend" in /etc/nginx/conf.d/default.conf:22
+nginx: [emerg] host not found in upstream "backend" in /etc/nginx/conf.d/default.conf:22
+```
+
+**Root cause:** The two environments have fundamentally different networking:
+
+| Environment | How containers reach each other | nginx upstream |
+|-------------|--------------------------------|----------------|
+| Docker Compose | Docker internal DNS — service name resolves | `http://backend:8000` |
+| ECS Fargate (`awsvpc`) | Shared network namespace — all containers share `localhost` | `http://localhost:8000` |
+
+There is no single `nginx.conf` that satisfies both. At nginx startup it resolves all upstream hostnames — if `backend` doesn't exist in DNS (as in ECS), nginx refuses to start.
+
+**Fix:** Keep two nginx configs and select the right one at Docker build time via a build arg:
+
+```
+frontend/
+  nginx.conf          ← local dev: SSL on 443, upstream = backend:8000
+  nginx.prod.conf     ← production: HTTP on 80, upstream = localhost:8000
+```
+
+`frontend/Dockerfile` (serve stage):
+```dockerfile
+ARG NGINX_CONF=nginx.conf
+COPY ${NGINX_CONF} /etc/nginx/conf.d/default.conf
+```
+
+`deploy/aws/deploy.sh`:
+```bash
+docker build --platform linux/amd64 -t finmonitor-frontend ./frontend \
+  --build-arg REACT_APP_API_URL=/api \
+  --build-arg REACT_APP_WS_URL=wss://<your-cloudfront-domain>/api/ws \
+  --build-arg NGINX_CONF=nginx.prod.conf   # ← selects HTTP-only, localhost upstream
+```
+
+Local Docker Compose doesn't pass this arg, so it defaults to `nginx.conf` (with SSL and `backend` upstream).
+
+---
+
 ## Useful commands
 
 ```bash
@@ -841,6 +884,7 @@ aws ecs delete-cluster --cluster $APP --region $AWS_REGION
 | `CannotPullContainerError: Manifest does not contain descriptor matching platform 'linux/amd64'` | ARM image pushed from Apple Silicon Mac | Add `--platform linux/amd64` to `docker build` in `deploy.sh` — see Issue 12 |
 | International stock price shows $0.00 | Finnhub free tier doesn't cover non-US exchanges | yfinance fallback in `FinnhubQuoteProvider` — see Issue 13 |
 | IPO section shows "No data" on fresh start | Scheduler waits full interval before first run | Set `next_run_time=now` in `start_scheduler()` — see Issue 14 |
+| Frontend exits code 1 — `host not found in upstream "backend"` | `nginx.conf` uses Docker Compose service name, ECS needs `localhost` | Use `nginx.prod.conf` + `NGINX_CONF` build arg in `deploy.sh` — see Issue 15 |
 | `CannotPullContainerError` | ECR auth or wrong image URI | Check execution role has `AmazonECSTaskExecutionRolePolicy` |
 | `npm install` fails in Docker build | Peer dependency conflict | Add `--legacy-peer-deps` to `RUN npm install` in Dockerfile |
 | Task definition registers but list is empty | Inline JSON escaping failure | Write JSON to a file, use `--cli-input-json file:///tmp/...` |
