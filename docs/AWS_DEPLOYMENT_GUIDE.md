@@ -714,6 +714,81 @@ ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 
 ---
 
+### Issue 12: `CannotPullContainerError: image Manifest does not contain descriptor matching platform 'linux/amd64'`
+
+**Symptom:** ECS tasks fail to start repeatedly with:
+```
+CannotPullContainerError: pull image manifest has been retried 7 time(s):
+image Manifest does not contain descriptor matching platform 'linux/amd64'
+```
+The service cycles through start → fail → start every ~15 minutes indefinitely.
+
+**Root cause:** `deploy.sh` used plain `docker build` without `--platform linux/amd64`. On an Apple Silicon Mac (M1/M2/M3), Docker defaults to building `linux/arm64` images. ECS Fargate tasks run on x86 (`linux/amd64`) by default, so the image architecture doesn't match and the task can't be pulled.
+
+**Fix:** Add `--platform linux/amd64` to both `docker build` commands in `deploy.sh`:
+```bash
+docker build --platform linux/amd64 -t finmonitor-backend ./backend
+docker build --platform linux/amd64 -t finmonitor-frontend ./frontend ...
+```
+
+**Note:** The build will be slower (QEMU emulation for cross-compilation), but the resulting image runs correctly on Fargate. Alternatively use `docker buildx build --platform linux/amd64 --load` as documented in Step 9.
+
+---
+
+### Issue 13: International stock prices show $0.00 (e.g. VOD.L, BMW.DE)
+
+**Symptom:** Tickers with exchange suffixes (`.L`, `.DE`, `.PA`, etc.) display `$0.00` for the price, but their charts load correctly.
+
+**Root cause:** Price quotes use Finnhub (`/quote` endpoint), while charts use yfinance. Finnhub's free tier does not cover non-US exchanges — it returns `{"c": 0, "d": 0, "dp": 0, ...}` for unsupported symbols rather than an error. The code treated `c: 0` as a valid price of zero.
+
+**Fix:** In `FinnhubQuoteProvider`, check if `c == 0` and fall back to yfinance:
+```python
+async def _yfinance_quote(symbol: str) -> dict:
+    def _fetch():
+        t = yf.Ticker(symbol)
+        fi = t.fast_info
+        price = fi.last_price
+        prev = fi.previous_close
+        change_pct = ((price - prev) / prev * 100) if prev else 0.0
+        return price, change_pct
+    price, change_pct = await asyncio.get_event_loop().run_in_executor(None, _fetch)
+    return {"symbol": symbol, "price": price or 0, "change_percent": change_pct or 0}
+
+# In fetch_quote / fetch_quotes_batch:
+price = data.get("c", 0)
+if not price:
+    return await _yfinance_quote(symbol)
+```
+yfinance is already used for chart data (candles endpoint) and requires no API key, so this is a zero-cost fallback.
+
+---
+
+### Issue 14: IPO section shows "No upcoming IPOs found" immediately after startup
+
+**Symptom:** The IPO section displays the empty-state message on first load, even though Alpha Vantage has upcoming IPO data. It only populates after ~1 hour.
+
+**Root cause (two-part):**
+1. The APScheduler jobs were added with `scheduler.add_job(poll_ipos, "interval", seconds=3600)` — no `next_run_time` specified. APScheduler defaults to running the job after the first full interval, meaning IPO data isn't fetched until 1 hour after startup.
+2. `AlphaVantageIPOProvider` returned `expected_date` as a plain string (`raw_date = "2026-03-10"`), but the `ipo_events.expected_date` DB column is typed `DATE`. asyncpg raised `AttributeError: 'str' object has no attribute 'toordinal'` during the INSERT, rolling back the transaction silently.
+
+**Fix:**
+```python
+# scheduler.py — run immediately on startup
+now = datetime.datetime.now(datetime.timezone.utc)
+scheduler.add_job(poll_ipos, "interval", seconds=settings.ipo_poll_interval_seconds,
+                  id="poll_ipos", next_run_time=now)
+
+# alpha_vantage_provider.py — use the already-parsed date object, not the raw string
+ipo_date = datetime.date.fromisoformat(raw_date)  # already done
+results.append({
+    ...
+    "expected_date": ipo_date,  # was: raw_date (string)
+    ...
+})
+```
+
+---
+
 ## Useful commands
 
 ```bash
@@ -763,6 +838,9 @@ aws ecs delete-cluster --cluster $APP --region $AWS_REGION
 | News feed always empty | datetime serialization crash rolls back DB | Add `_DatetimeEncoder` to `websocket_manager.py` — see Issue 9 |
 | Chat returns "Something went wrong" | `.env` API URL baked into build | Declare `ARG`/`ENV REACT_APP_API_URL=/api` in Dockerfile — see Issue 10 |
 | Status shows "Disconnected" permanently | `.env` WS URL baked into build | Declare `ARG`/`ENV REACT_APP_WS_URL=` (empty) in Dockerfile — see Issue 11 |
+| `CannotPullContainerError: Manifest does not contain descriptor matching platform 'linux/amd64'` | ARM image pushed from Apple Silicon Mac | Add `--platform linux/amd64` to `docker build` in `deploy.sh` — see Issue 12 |
+| International stock price shows $0.00 | Finnhub free tier doesn't cover non-US exchanges | yfinance fallback in `FinnhubQuoteProvider` — see Issue 13 |
+| IPO section shows "No data" on fresh start | Scheduler waits full interval before first run | Set `next_run_time=now` in `start_scheduler()` — see Issue 14 |
 | `CannotPullContainerError` | ECR auth or wrong image URI | Check execution role has `AmazonECSTaskExecutionRolePolicy` |
 | `npm install` fails in Docker build | Peer dependency conflict | Add `--legacy-peer-deps` to `RUN npm install` in Dockerfile |
 | Task definition registers but list is empty | Inline JSON escaping failure | Write JSON to a file, use `--cli-input-json file:///tmp/...` |
