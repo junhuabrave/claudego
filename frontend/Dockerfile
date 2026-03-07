@@ -10,6 +10,9 @@ ENV REACT_APP_API_URL=$REACT_APP_API_URL
 # Leave WS URL empty so useWebSocket.ts derives it from window.location.host at runtime.
 ARG REACT_APP_WS_URL=
 ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
+# Google OAuth client ID — baked into the React bundle at build time.
+ARG REACT_APP_GOOGLE_CLIENT_ID=
+ENV REACT_APP_GOOGLE_CLIENT_ID=$REACT_APP_GOOGLE_CLIENT_ID
 RUN npm run build
 
 # Serve stage

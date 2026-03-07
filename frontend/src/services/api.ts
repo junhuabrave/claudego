@@ -1,9 +1,19 @@
 import axios from "axios";
-import type { CandlePoint, ChatResponse, IPOEvent, NewsArticle, Reminder, Ticker } from "../types";
+import { getOrCreateSessionId } from "../contexts/AuthContext";
+import type { CandlePoint, ChatResponse, IPOEvent, NewsArticle, PriceAlert, Reminder, Ticker } from "../types";
 
 const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000/api";
 
 const client = axios.create({ baseURL: API_URL });
+
+// Attach auth headers on every request
+client.interceptors.request.use((config) => {
+  const token = localStorage.getItem("finmonitor_token");
+  const sessionId = getOrCreateSessionId();
+  if (token) config.headers["Authorization"] = `Bearer ${token}`;
+  config.headers["X-Session-ID"] = sessionId;
+  return config;
+});
 
 // --- Tickers ---
 export const getTickers = () => client.get<Ticker[]>("/tickers").then((r) => r.data);
@@ -41,3 +51,19 @@ export const getCandles = (symbol: string, resolution = "5", days = 1) =>
 // --- Chat ---
 export const sendChatMessage = (message: string) =>
   client.post<ChatResponse>("/chat", { message }).then((r) => r.data);
+
+// --- Price Alerts ---
+export const alertsApi = {
+  list: () => client.get<PriceAlert[]>("/alerts").then((r) => r.data),
+
+  create: (payload: { symbol: string; threshold_pct: number; direction: string }) =>
+    client.post<PriceAlert>("/alerts", payload).then((r) => r.data),
+
+  update: (
+    id: number,
+    payload: Partial<{ threshold_pct: number; direction: string; is_active: boolean }>
+  ) => client.put<PriceAlert>(`/alerts/${id}`, payload).then((r) => r.data),
+
+  remove: (id: number): Promise<void> =>
+    client.delete(`/alerts/${id}`).then(() => undefined),
+};

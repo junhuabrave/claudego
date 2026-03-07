@@ -14,6 +14,7 @@ import {
 } from "@mui/material";
 import DeleteIcon from "@mui/icons-material/Delete";
 import BarChartIcon from "@mui/icons-material/BarChart";
+import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
 import type { Ticker } from "../types";
@@ -22,9 +23,10 @@ interface Props {
   tickers: Ticker[];
   onRemove: (symbol: string) => void;
   onSelectSymbol: (ticker: Ticker) => void;
+  onManageAlerts: (symbol: string) => void;
 }
 
-export default function WatchList({ tickers, onRemove, onSelectSymbol }: Props) {
+export default function WatchList({ tickers, onRemove, onSelectSymbol, onManageAlerts }: Props) {
   if (!tickers.length) {
     return (
       <Typography color="text.secondary" sx={{ p: 2 }}>
@@ -42,7 +44,7 @@ export default function WatchList({ tickers, onRemove, onSelectSymbol }: Props) 
             <TableCell>Name</TableCell>
             <TableCell align="right">Price</TableCell>
             <TableCell align="right">Change</TableCell>
-            <TableCell align="center" width={80}></TableCell>
+            <TableCell align="center" width={100}></TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -92,6 +94,17 @@ export default function WatchList({ tickers, onRemove, onSelectSymbol }: Props) 
                   )}
                 </TableCell>
                 <TableCell align="center">
+                  <Tooltip title="Manage alerts">
+                    <IconButton
+                      size="small"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onManageAlerts(t.symbol);
+                      }}
+                    >
+                      <NotificationsNoneIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
                   <Tooltip title="Remove">
                     <IconButton
                       size="small"

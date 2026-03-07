@@ -62,6 +62,36 @@ export interface CandlePoint {
 }
 
 export interface WSMessage {
-  type: "news" | "quotes" | "ipo_update" | "pong";
+  type: "news" | "quotes" | "ipo_update" | "pong" | "alert";
   data: Record<string, unknown>;
+}
+
+export interface User {
+  id: number;
+  email: string | null;
+  display_name: string;
+  tier: string;
+  public_profile: boolean;
+  is_anonymous: boolean;
+}
+
+export interface PriceAlert {
+  id: number;
+  symbol: string;
+  threshold_pct: number;
+  direction: "up" | "down" | "both";
+  is_active: boolean;
+  triggered_at: string | null;
+  created_at: string;
+}
+
+export interface AlertTriggered {
+  alert_id: number;
+  user_id: number;
+  symbol: string;
+  threshold_pct: number;
+  direction: string;
+  actual_change_pct: number;
+  current_price: number;
+  triggered_at: string;
 }
