@@ -212,8 +212,10 @@ main (protected — requires PR + CI pass + 1 approval)
 - **Foreign keys**: `<referenced_table_singular>_id` (e.g., `user_id`, `ipo_event_id`)
 - **Indexes**: auto-named by SQLAlchemy, manual names as `ix_<table>_<column>`
 - **Unique constraints**: `uq_<table>_<columns>` (e.g., `uq_user_watchlist_user_id_symbol`)
-- **Boolean columns**: prefix with `is_` or `has_` (`is_active`, `is_public`, `has_premium`)
+- **Boolean columns**: prefix with `is_` or `has_` for new columns (`is_active`, `is_public`)
+  - Note: legacy columns `active` (Ticker) and `sent` (Reminder) predate this convention — rename in a future migration
 - **Timestamps**: always `DateTime(timezone=True)` with `server_default=func.now()`
+- **Foreign keys**: currently stored as plain `Integer` columns without `ForeignKey()` constraints — add proper FK constraints via Alembic migration in Phase 1
 
 ## API Error Response Format
 

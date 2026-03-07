@@ -110,25 +110,41 @@ class ResourceResponse(BaseModel):
 
 - Request schemas: `*Create`, `*Update` (partial fields with `Optional`)
 - Response schemas: `*Response` with `from_attributes = True`
+- Prefer `model_config = ConfigDict(from_attributes=True)` (typed) over dict style
 - Never expose internal fields (e.g., `user_id` in responses unless needed)
+- Use `field_validator` for data sanitization (see `TickerResponse.sanitize_float` — converts NaN/Inf to None)
 
 ### Provider Pattern
 ```python
-# All external data sources go through the provider abstraction
-class NewProvider(BaseProvider):
-    """Implement the abstract interface, never call external APIs directly from routes."""
+# Three abstract base classes in providers/base.py:
+#   NewsProvider  — fetch_market_news(), fetch_news_for_ticker()
+#   QuoteProvider — fetch_quote(), fetch_quotes_batch()
+#   IPOProvider   — fetch_upcoming_ipos()
 
-    async def fetch_data(self, params: dict) -> list[dict]:
+# Example: implementing a new news provider
+class ReutersNewsProvider(NewsProvider):
+    async def fetch_market_news(self, category: str = "general") -> list[dict]:
         async with httpx.AsyncClient() as client:
-            resp = await client.get(self.base_url, params=params, timeout=10.0)
+            resp = await client.get(self.base_url, params={"cat": category}, timeout=10.0)
             resp.raise_for_status()
-            return resp.json()
+            return self._transform(resp.json())
+
+    async def fetch_news_for_ticker(self, symbol: str) -> list[dict]:
+        ...
+```
+
+**Factory registration** (`providers/factory.py`):
+```python
+# Three registries — add your provider to the correct one:
+NEWS_PROVIDERS:  dict[str, type[NewsProvider]]  = {"finnhub": ..., "reuters": ReutersNewsProvider}
+QUOTE_PROVIDERS: dict[str, type[QuoteProvider]] = {"finnhub": FinnhubQuoteProvider}
+IPO_PROVIDERS:   dict[str, type[IPOProvider]]   = {"alphavantage": ..., "finnhub": ...}
 ```
 
 - All external API calls go through `providers/` — never call httpx directly from routes
 - Set explicit `timeout=10.0` on all HTTP calls
 - Handle provider failures gracefully — log + return empty, don't crash the scheduler
-- Use the factory pattern (`providers/factory.py`) for swappable implementations
+- The factory instantiates providers via `get_news_provider()`, `get_quote_provider()`, `get_ipo_provider()`
 
 ### Error Handling
 ```python
@@ -153,9 +169,29 @@ except Exception:
 
 ### WebSocket
 - All broadcast messages follow: `{"type": "<type>", "data": {...}}`
-- Valid types: `quotes`, `news`, `alert`, `ipo_update`
+- Valid types: `quotes`, `news`, `alert`, `ipo_update`, `pong`
 - New message types must be documented and coordinated with Frontend team
 - WebSocket connections are unauthenticated (broadcast model) — sensitive data must NOT go through WS
+- **SECURITY NOTE**: Alert broadcasts currently include `user_id` and go to ALL connected clients. Until authenticated WS is implemented (Phase 2), avoid adding more user-identifying data to broadcasts
+
+### Scheduler vs Route Database Access
+```python
+# Routes use the get_db() dependency (auto-commit on success, auto-rollback on exception):
+async def my_route(db: AsyncSession = Depends(get_db)):
+    db.add(thing)
+    await db.commit()  # explicit commit is fine — get_db also commits but second is a no-op
+
+# Scheduler jobs use async_session() directly (no request context, no FastAPI dependencies):
+from app.core.database import async_session
+async def poll_quotes():
+    async with async_session() as session:
+        # Must manually commit and handle exceptions
+        await session.commit()
+```
+
+- Routes: always use `Depends(get_db)` — get_db auto-commits when the handler returns successfully
+- Scheduler: always use `async with async_session() as session:` — explicit commit required
+- Never mix these patterns
 
 ### Blocking I/O in Async Code
 ```python
@@ -197,12 +233,13 @@ stmt = pg_insert(NewsArticle).values(**data).on_conflict_do_nothing(index_elemen
 ```
 
 ### Adding a New Data Provider (Step-by-Step)
-1. Create `backend/app/providers/new_provider.py` implementing the base interface
-2. Register it in `backend/app/providers/factory.py` with a config key
-3. Add config key to `backend/app/core/config.py` (e.g., `news_provider: str = "finnhub"`)
-4. Add API key to `.env.example` if needed
-5. Write tests in `backend/tests/test_providers.py` with mocked HTTP responses
-6. Update `docs/` with provider setup instructions
+1. Identify which interface to implement: `NewsProvider`, `QuoteProvider`, or `IPOProvider` (in `providers/base.py`)
+2. Create `backend/app/providers/new_provider.py` implementing ALL abstract methods
+3. Register it in `backend/app/providers/factory.py` — add to the correct registry dict (`NEWS_PROVIDERS`, `QUOTE_PROVIDERS`, or `IPO_PROVIDERS`)
+4. If it's selectable via config, add a setting to `backend/app/core/config.py` (e.g., `news_provider: str = "finnhub"`) and update the corresponding `get_*_provider()` factory function
+5. Add API key field to `config.py` and `.env.example` if the provider requires one
+6. Write tests in `backend/tests/test_providers.py` — mock `httpx.AsyncClient` responses
+7. Coordinate with DevOps to add the API key to secrets management
 
 ### Performance Rules for Scale
 - **Batch database operations** — use `insert().values([...])` instead of N individual inserts

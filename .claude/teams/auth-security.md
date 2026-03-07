@@ -105,22 +105,24 @@ RATE_LIMITS = {
 
 ### Input Validation & Sanitization
 ```python
-# Pydantic handles most validation — but add explicit checks for:
+# ALREADY IMPLEMENTED in schemas.py:
+class PriceAlertCreate(BaseModel):
+    threshold_pct: float = Field(gt=0, le=100)                          # range validation ✓
+    direction: str = Field(default="both", pattern="^(up|down|both)$")  # enum validation ✓
 
-# 1. Symbol validation — prevent injection
+class TickerResponse(BaseModel):
+    @field_validator("last_price", "change_percent", mode="before")
+    def sanitize_float(cls, v):  # NaN/Inf → None ✓
+
+# NEEDS TO BE ADDED (Phase 1):
+# 1. Symbol validation on TickerCreate — currently accepts any string
 SYMBOL_PATTERN = re.compile(r'^[\^]?[A-Z0-9.-]{1,20}$')
-def validate_symbol(symbol: str) -> str:
-    if not SYMBOL_PATTERN.match(symbol.upper()):
-        raise HTTPException(400, "Invalid ticker symbol")
-    return symbol.upper()
 
-# 2. String length limits — prevent DoS via large payloads
+# 2. String length limit on ChatMessage — currently unbounded
 class ChatMessage(BaseModel):
     message: str = Field(..., min_length=1, max_length=500)
 
-# 3. Numeric range validation
-class PriceAlertCreate(BaseModel):
-    threshold_pct: float = Field(..., gt=0, le=100)  # 0-100%
+# 3. Request body size limit in uvicorn/nginx — currently unlimited
 ```
 
 - **Never** construct SQL from user input — always use SQLAlchemy ORM
