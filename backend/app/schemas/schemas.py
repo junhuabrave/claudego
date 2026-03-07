@@ -1,7 +1,56 @@
 import datetime
 import math
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+# --- User ---
+class UserResponse(BaseModel):
+    id: int
+    email: str | None = None
+    display_name: str
+    tier: str
+    public_profile: bool
+    is_anonymous: bool = False
+    # google_id is read from the ORM object to compute is_anonymous,
+    # but excluded from the JSON response so it is never sent to the client.
+    google_id: str | None = Field(default=None, exclude=True, repr=False)
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def compute_is_anonymous(self) -> "UserResponse":
+        self.is_anonymous = self.google_id is None
+        return self
+
+
+class UserUpdate(BaseModel):
+    display_name: str | None = None
+
+
+# --- Price Alerts ---
+class PriceAlertCreate(BaseModel):
+    symbol: str
+    threshold_pct: float = Field(gt=0, le=100)
+    direction: str = Field(default="both", pattern="^(up|down|both)$")
+
+
+class PriceAlertUpdate(BaseModel):
+    threshold_pct: float | None = Field(default=None, gt=0, le=100)
+    direction: str | None = Field(default=None, pattern="^(up|down|both)$")
+    is_active: bool | None = None
+
+
+class PriceAlertResponse(BaseModel):
+    id: int
+    symbol: str
+    threshold_pct: float
+    direction: str
+    is_active: bool
+    triggered_at: datetime.datetime | None = None
+    created_at: datetime.datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Ticker ---

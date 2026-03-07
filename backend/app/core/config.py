@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     ipo_poll_interval_seconds: int = 3600
     quotes_poll_interval_seconds: int = 30
 
+    # Auth
+    google_client_id: str = ""
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_days: int = 30
+
+    # Threshold alerts
+    alerts_require_premium: bool = False   # flip True to gate feature for free users
+    alert_cooldown_minutes: int = 60       # min minutes between re-firing same alert
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

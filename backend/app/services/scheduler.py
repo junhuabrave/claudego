@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.core.config import settings
 from app.core.database import async_session
-from app.models.models import IPOEvent, NewsArticle, Reminder, Ticker
+from app.models.models import IPOEvent, NewsArticle, PriceAlert, Reminder, Ticker, UserWatchlist
 from app.providers.factory import get_ipo_provider, get_news_provider, get_quote_provider
 from app.services.notification import send_reminder
 from app.services.websocket_manager import ws_manager
@@ -66,11 +66,12 @@ async def poll_ipos():
 
 
 async def poll_quotes():
-    """Fetch latest quotes for all active tickers."""
+    """Fetch latest quotes for all symbols watched by any user."""
     try:
+        # Track B: query distinct symbols from UserWatchlist (not Ticker.active)
         async with async_session() as session:
             result = await session.execute(
-                select(Ticker.symbol).where(Ticker.active.is_(True))
+                select(UserWatchlist.symbol).distinct()
             )
             symbols = [row[0] for row in result.fetchall()]
 
@@ -92,8 +93,85 @@ async def poll_quotes():
 
         await ws_manager.broadcast("quotes", {"quotes": quotes})
         logger.info("Updated quotes for %d tickers", len(quotes))
+
+        # Track C: check threshold alerts after broadcasting updated prices
+        await check_price_alerts(quotes)
+
     except Exception:
         logger.exception("Error polling quotes")
+
+
+async def check_price_alerts(quotes: list[dict]) -> None:
+    """
+    Track C: Compare freshly-polled quotes against active PriceAlert rows.
+    Broadcast a WebSocket "alert" message for each threshold crossed.
+    """
+    if not quotes:
+        return
+
+    symbol_to_quote = {q["symbol"]: q for q in quotes}
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cooldown = datetime.timedelta(minutes=settings.alert_cooldown_minutes)
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(PriceAlert).where(
+                PriceAlert.is_active.is_(True),
+                PriceAlert.symbol.in_(list(symbol_to_quote.keys())),
+            )
+        )
+        alerts = result.scalars().all()
+
+        triggered_ids: list[int] = []
+        broadcasts: list[dict] = []
+
+        for alert in alerts:
+            quote = symbol_to_quote.get(alert.symbol)
+            if not quote or quote.get("change_percent") is None:
+                continue
+
+            change = quote["change_percent"]
+
+            crossed = False
+            if alert.direction == "up" and change >= alert.threshold_pct:
+                crossed = True
+            elif alert.direction == "down" and change <= -alert.threshold_pct:
+                crossed = True
+            elif alert.direction == "both" and abs(change) >= alert.threshold_pct:
+                crossed = True
+
+            if not crossed:
+                continue
+
+            # Cooldown: skip if fired recently
+            if alert.triggered_at and (now - alert.triggered_at) < cooldown:
+                continue
+
+            triggered_ids.append(alert.id)
+            broadcasts.append({
+                "alert_id": alert.id,
+                "user_id": alert.user_id,
+                "symbol": alert.symbol,
+                "threshold_pct": alert.threshold_pct,
+                "direction": alert.direction,
+                "actual_change_pct": round(change, 2),
+                "current_price": quote.get("price", 0),
+                "triggered_at": now.isoformat(),
+            })
+
+        if triggered_ids:
+            await session.execute(
+                update(PriceAlert)
+                .where(PriceAlert.id.in_(triggered_ids))
+                .values(triggered_at=now)
+            )
+            await session.commit()
+
+    for payload in broadcasts:
+        await ws_manager.broadcast("alert", payload)
+
+    if broadcasts:
+        logger.info("Fired %d price alerts", len(broadcasts))
 
 
 async def check_reminders():

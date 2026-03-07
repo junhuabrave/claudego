@@ -1,22 +1,32 @@
 """API routes for the financial monitoring system."""
 
 import datetime
-import time
 
-import httpx
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.auth import get_current_user
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.models import IPOEvent, NewsArticle, Reminder, Ticker
+from app.models.models import (
+    IPOEvent,
+    NewsArticle,
+    PriceAlert,
+    Reminder,
+    Ticker,
+    User,
+    UserWatchlist,
+)
 from app.providers.factory import get_quote_provider
 from app.schemas.schemas import (
     ChatMessage,
     ChatResponse,
     IPOEventResponse,
     NewsArticleResponse,
+    PriceAlertCreate,
+    PriceAlertResponse,
+    PriceAlertUpdate,
     ReminderCreate,
     ReminderResponse,
     TickerCreate,
@@ -28,60 +38,90 @@ from app.services.websocket_manager import ws_manager
 router = APIRouter()
 
 
-# --- Tickers ---
+# ---------------------------------------------------------------------------
+# Tickers  (per-user watchlist)
+# ---------------------------------------------------------------------------
+
 @router.get("/tickers", response_model=list[TickerResponse])
-async def list_tickers(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Ticker).where(Ticker.active.is_(True)).order_by(Ticker.symbol))
+async def list_tickers(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Ticker)
+        .join(UserWatchlist, UserWatchlist.symbol == Ticker.symbol)
+        .where(UserWatchlist.user_id == current_user.id)
+        .order_by(Ticker.symbol)
+    )
     return result.scalars().all()
 
 
 @router.post("/tickers", response_model=TickerResponse, status_code=201)
-async def add_ticker(payload: TickerCreate, db: AsyncSession = Depends(get_db)):
-    existing = await db.execute(select(Ticker).where(Ticker.symbol == payload.symbol.upper()))
-    ticker = existing.scalar_one_or_none()
-    if ticker:
-        if not ticker.active:
-            ticker.active = True
-            await db.flush()
-            return ticker
-        raise HTTPException(status_code=409, detail=f"{payload.symbol} already in watchlist")
+async def add_ticker(
+    payload: TickerCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    symbol = payload.symbol.upper()
 
-    # Fetch initial quote
-    name = payload.name
-    if not name:
-        name = payload.symbol.upper()
-
-    ticker = Ticker(
-        symbol=payload.symbol.upper(),
-        name=name,
-        exchange=payload.exchange,
-        active=True,
+    existing_wl = await db.execute(
+        select(UserWatchlist).where(
+            UserWatchlist.user_id == current_user.id,
+            UserWatchlist.symbol == symbol,
+        )
     )
-    db.add(ticker)
-    await db.flush()
+    if existing_wl.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"{symbol} already in your watchlist")
 
-    try:
-        provider = get_quote_provider()
-        quote = await provider.fetch_quote(payload.symbol.upper())
-        ticker.last_price = quote.get("price")
-        ticker.change_percent = quote.get("change_percent")
-    except Exception:
-        pass
+    existing_ticker = await db.execute(select(Ticker).where(Ticker.symbol == symbol))
+    ticker = existing_ticker.scalar_one_or_none()
+    if ticker is None:
+        ticker = Ticker(
+            symbol=symbol,
+            name=payload.name or symbol,
+            exchange=payload.exchange,
+            active=True,
+        )
+        db.add(ticker)
+        await db.flush()
+        try:
+            provider = get_quote_provider()
+            quote = await provider.fetch_quote(symbol)
+            ticker.last_price = quote.get("price")
+            ticker.change_percent = quote.get("change_percent")
+        except Exception:
+            pass
+    else:
+        ticker.active = True
 
+    db.add(UserWatchlist(user_id=current_user.id, symbol=symbol))
+    await db.commit()
+    await db.refresh(ticker)
     return ticker
 
 
 @router.delete("/tickers/{symbol}", status_code=204)
-async def remove_ticker(symbol: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Ticker).where(Ticker.symbol == symbol.upper()))
-    ticker = result.scalar_one_or_none()
-    if not ticker:
-        raise HTTPException(status_code=404, detail="Ticker not found")
-    ticker.active = False
+async def remove_ticker(
+    symbol: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        delete(UserWatchlist).where(
+            UserWatchlist.user_id == current_user.id,
+            UserWatchlist.symbol == symbol.upper(),
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Ticker not in your watchlist")
+    await db.commit()
     return None
 
 
-# --- News ---
+# ---------------------------------------------------------------------------
+# News
+# ---------------------------------------------------------------------------
+
 @router.get("/news", response_model=list[NewsArticleResponse])
 async def list_news(
     limit: int = 50,
@@ -95,7 +135,10 @@ async def list_news(
     return result.scalars().all()
 
 
-# --- IPO Events ---
+# ---------------------------------------------------------------------------
+# IPO Events
+# ---------------------------------------------------------------------------
+
 @router.get("/ipos", response_model=list[IPOEventResponse])
 async def list_ipos(db: AsyncSession = Depends(get_db)):
     today = datetime.date.today()
@@ -108,17 +151,17 @@ async def list_ipos(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-# --- Reminders ---
+# ---------------------------------------------------------------------------
+# Reminders
+# ---------------------------------------------------------------------------
+
 @router.post("/reminders", response_model=ReminderResponse, status_code=201)
 async def create_reminder(payload: ReminderCreate, db: AsyncSession = Depends(get_db)):
-    # Validate IPO event exists
     ipo = await db.execute(select(IPOEvent).where(IPOEvent.id == payload.ipo_event_id))
     if not ipo.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="IPO event not found")
-
     if payload.notify_via not in ("email", "pagerduty"):
         raise HTTPException(status_code=400, detail="notify_via must be 'email' or 'pagerduty'")
-
     reminder = Reminder(**payload.model_dump())
     db.add(reminder)
     await db.flush()
@@ -139,26 +182,117 @@ async def delete_reminder(reminder_id: int, db: AsyncSession = Depends(get_db)):
     return None
 
 
-# --- Chat ---
+# ---------------------------------------------------------------------------
+# Price Alerts  (per-user)
+# ---------------------------------------------------------------------------
+
+@router.get("/alerts", response_model=list[PriceAlertResponse])
+async def list_alerts(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PriceAlert)
+        .where(PriceAlert.user_id == current_user.id)
+        .order_by(PriceAlert.created_at.desc())
+    )
+    return result.scalars().all()
+
+
+@router.post("/alerts", response_model=PriceAlertResponse, status_code=201)
+async def create_alert(
+    payload: PriceAlertCreate,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if settings.alerts_require_premium and current_user.tier != "premium":
+        raise HTTPException(
+            status_code=403, detail="Threshold alerts require a premium subscription"
+        )
+    alert = PriceAlert(
+        user_id=current_user.id,
+        symbol=payload.symbol.upper(),
+        threshold_pct=payload.threshold_pct,
+        direction=payload.direction,
+        is_premium_feature=True,
+    )
+    db.add(alert)
+    await db.commit()
+    await db.refresh(alert)
+    return alert
+
+
+@router.put("/alerts/{alert_id}", response_model=PriceAlertResponse)
+async def update_alert(
+    alert_id: int,
+    payload: PriceAlertUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(PriceAlert).where(
+            PriceAlert.id == alert_id, PriceAlert.user_id == current_user.id
+        )
+    )
+    alert = result.scalar_one_or_none()
+    if alert is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    if payload.threshold_pct is not None:
+        alert.threshold_pct = payload.threshold_pct
+    if payload.direction is not None:
+        alert.direction = payload.direction
+    if payload.is_active is not None:
+        alert.is_active = payload.is_active
+    await db.commit()
+    await db.refresh(alert)
+    return alert
+
+
+@router.delete("/alerts/{alert_id}", status_code=204)
+async def delete_alert(
+    alert_id: int,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        delete(PriceAlert).where(
+            PriceAlert.id == alert_id, PriceAlert.user_id == current_user.id
+        )
+    )
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    await db.commit()
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Chat  (per-user scoped)
+# ---------------------------------------------------------------------------
+
 @router.post("/chat", response_model=ChatResponse)
-async def chat(payload: ChatMessage, db: AsyncSession = Depends(get_db)):
+async def chat(
+    payload: ChatMessage,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     parsed = parse_chat_message(payload.message)
 
     if parsed["action"] == "add_ticker":
         ticker_data = TickerCreate(symbol=parsed["ticker"])
         try:
-            await add_ticker(ticker_data, db)
+            await add_ticker(ticker_data, current_user, db)
         except HTTPException:
             parsed["reply"] = f"{parsed['ticker']} is already in your watchlist."
 
     elif parsed["action"] == "remove_ticker":
         try:
-            await remove_ticker(parsed["ticker"], db)
+            await remove_ticker(parsed["ticker"], current_user, db)
         except HTTPException:
             parsed["reply"] = f"{parsed['ticker']} is not in your watchlist."
 
     elif parsed["action"] == "list_tickers":
-        tickers = await list_tickers(db)
+        tickers = await list_tickers(current_user, db)
         if tickers:
             symbols = ", ".join(t.symbol for t in tickers)
             parsed["reply"] = f"Your watchlist: {symbols}"
@@ -172,10 +306,11 @@ async def chat(payload: ChatMessage, db: AsyncSession = Depends(get_db)):
     )
 
 
-# --- Candles ---
-_VALID_RESOLUTIONS = {"1", "5", "15", "30", "60", "D", "W"}
+# ---------------------------------------------------------------------------
+# Candles
+# ---------------------------------------------------------------------------
 
-# Map (resolution, days) → yfinance (period, interval)
+_VALID_RESOLUTIONS = {"1", "5", "15", "30", "60", "D", "W"}
 _YF_INTERVAL_MAP = {"1": "1m", "5": "5m", "15": "15m", "30": "30m", "60": "60m"}
 
 
@@ -188,13 +323,12 @@ def _yf_params(resolution: str, days: int) -> tuple[str, str]:
         if days <= 30:
             return "1mo", "1d"
         return "3mo", "1d"
-    # W
     return "3mo", "1wk"
 
 
 @router.get("/candles/{symbol}")
 async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
-    """Fetch OHLCV candle data via Yahoo Finance (yfinance). No API key required."""
+    """Fetch OHLCV candle data via Yahoo Finance. No API key required."""
     import asyncio
 
     import yfinance as yf
@@ -205,10 +339,9 @@ async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
     period, interval = _yf_params(resolution, days)
 
     try:
-        # yfinance is synchronous — run in thread pool to avoid blocking the event loop
-        ticker = yf.Ticker(symbol.upper())
+        ticker_obj = yf.Ticker(symbol.upper())
         hist = await asyncio.get_event_loop().run_in_executor(
-            None, lambda: ticker.history(period=period, interval=interval)
+            None, lambda: ticker_obj.history(period=period, interval=interval)
         )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -229,14 +362,16 @@ async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
     ]
 
 
-# --- WebSocket ---
+# ---------------------------------------------------------------------------
+# WebSocket
+# ---------------------------------------------------------------------------
+
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await ws_manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_text()
-            # Client can send ping / subscribe messages; for now just keep alive
             if data == "ping":
                 await ws_manager.send_personal(websocket, "pong", {})
     except WebSocketDisconnect:
