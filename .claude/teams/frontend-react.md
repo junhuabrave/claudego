@@ -136,44 +136,64 @@ const StyledCard = styled(Card)(({ theme }) => ({
 ### API Client (`services/api.ts`)
 ```typescript
 // All API calls go through the axios instance in api.ts
-// The instance auto-attaches auth headers (Bearer token or X-Session-ID)
+// The interceptor auto-attaches both headers on every request:
+//   - Authorization: Bearer <jwt>  (if logged in)
+//   - X-Session-ID: <uuid>         (always — for anonymous tracking)
 
-// Pattern for new API calls:
-export async function getAlerts(): Promise<PriceAlert[]> {
-  const { data } = await api.get<PriceAlert[]>("/alerts");
-  return data;
-}
+// Pattern 1: Simple named exports (used for tickers, news, IPOs, chat)
+export const getTickers = () => client.get<Ticker[]>("/tickers").then(r => r.data);
+export const addTicker = (symbol: string, name?: string) =>
+  client.post<Ticker>("/tickers", { symbol, name: name || "" }).then(r => r.data);
 
-export async function createAlert(payload: CreateAlertPayload): Promise<PriceAlert> {
-  const { data } = await api.post<PriceAlert>("/alerts", payload);
-  return data;
-}
+// Pattern 2: Grouped object export (used for alerts — preferred for CRUD resources)
+export const alertsApi = {
+  list: () => client.get<PriceAlert[]>("/alerts").then(r => r.data),
+  create: (payload: { symbol: string; threshold_pct: number; direction: string }) =>
+    client.post<PriceAlert>("/alerts", payload).then(r => r.data),
+  update: (id: number, payload: Partial<{...}>) =>
+    client.put<PriceAlert>(`/alerts/${id}`, payload).then(r => r.data),
+  remove: (id: number) => client.delete(`/alerts/${id}`).then(() => undefined),
+};
 ```
 
-- Every API call is a named export function in `api.ts`
-- Use TypeScript generics on axios calls: `api.get<ResponseType>()`
+**Important:** `AuthContext` uses raw `fetch()` for `/auth/me` and `/auth/google` instead of the axios client. This is intentional to avoid circular dependency (api.ts imports from AuthContext). Do not refactor this without careful consideration.
+
+- Use TypeScript generics on axios calls: `client.get<ResponseType>()`
 - Handle errors at the component level (toast/snackbar), not in the API layer
 - Base URL comes from environment: `REACT_APP_API_URL`
+- For new CRUD resources, prefer the grouped object pattern (`alertsApi` style)
 
 ### WebSocket (`hooks/useWebSocket.ts`)
 ```typescript
-// The useWebSocket hook handles:
-// - Connection lifecycle (connect, disconnect, reconnect)
-// - Message parsing: { type: string, data: any }
-// - Auto-reconnect with 3s delay
-// - Ping/pong keepalive
+// The hook takes a callback — NOT a "lastMessage" pattern
+// Signature: useWebSocket(onMessage: (msg: WSMessage) => void) => { connected: boolean }
 
 // Usage in components:
-const { lastMessage } = useWebSocket();
-
-useEffect(() => {
-  if (lastMessage?.type === "quotes") {
-    updateQuotes(lastMessage.data.quotes);
+const { connected } = useWebSocket((msg) => {
+  switch (msg.type) {
+    case "quotes":
+      setTickers(prev => mergeQuotes(prev, msg.data.quotes));
+      break;
+    case "news":
+      setNews(prev => [msg.data, ...prev]);
+      break;
+    case "alert":
+      showAlertNotification(msg.data);
+      break;
   }
-}, [lastMessage]);
+});
+
+// Show connection status to user
+{!connected && <Chip label="Reconnecting..." color="warning" size="small" />}
 ```
 
-- WebSocket message types: `quotes`, `news`, `alert`, `ipo_update`
+**Hook internals (do not change without Backend coordination):**
+- Auto-reconnects with 3s delay on disconnect
+- Sends "ping" every 30s to keep connection alive
+- WS URL from `REACT_APP_WS_URL` env var, fallback auto-detects protocol
+- `onMessageRef` pattern avoids stale closure issues
+
+**WebSocket message types:** `quotes`, `news`, `alert`, `ipo_update`
 - New message types require coordination with Backend team
 - Always handle connection errors gracefully — show "Reconnecting..." indicator
 

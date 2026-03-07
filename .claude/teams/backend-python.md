@@ -157,6 +157,53 @@ except Exception:
 - New message types must be documented and coordinated with Frontend team
 - WebSocket connections are unauthenticated (broadcast model) — sensitive data must NOT go through WS
 
+### Blocking I/O in Async Code
+```python
+# When calling synchronous/blocking libraries (e.g., yfinance), wrap in run_in_executor
+import asyncio
+
+hist = await asyncio.get_event_loop().run_in_executor(
+    None, lambda: yf.Ticker(symbol).history(period="1d", interval="5m")
+)
+```
+
+- **Never** call blocking I/O directly in async handlers — it blocks the event loop for all users
+- Use `run_in_executor(None, fn)` to run blocking code in a thread pool
+- Prefer async libraries when available (`httpx` over `requests`, `asyncpg` over `psycopg2`)
+
+### JSON Serialization for WebSocket
+```python
+# The codebase uses a custom _DatetimeEncoder for WebSocket payloads
+# All datetimes are serialized to ISO 8601 strings automatically
+class _DatetimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+# Used by ws_manager.broadcast() — you don't call it directly
+# But if adding new data types to WS payloads, ensure they're JSON-serializable
+```
+
+### PostgreSQL-Specific Patterns
+```python
+# on_conflict_do_nothing requires PostgreSQL dialect import
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+stmt = pg_insert(NewsArticle).values(**data).on_conflict_do_nothing(index_elements=["external_id"])
+
+# CAVEAT: This does NOT work in SQLite (used in tests). For test compatibility,
+# either mock the upsert or use a try/except IntegrityError pattern in tests.
+```
+
+### Adding a New Data Provider (Step-by-Step)
+1. Create `backend/app/providers/new_provider.py` implementing the base interface
+2. Register it in `backend/app/providers/factory.py` with a config key
+3. Add config key to `backend/app/core/config.py` (e.g., `news_provider: str = "finnhub"`)
+4. Add API key to `.env.example` if needed
+5. Write tests in `backend/tests/test_providers.py` with mocked HTTP responses
+6. Update `docs/` with provider setup instructions
+
 ### Performance Rules for Scale
 - **Batch database operations** — use `insert().values([...])` instead of N individual inserts
 - **Use Redis cache** for hot data (quotes: 30s TTL, news list: 60s TTL)

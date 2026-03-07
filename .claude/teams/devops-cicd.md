@@ -424,22 +424,30 @@ Global:
 | SEV3 | Minor issue, workaround exists | 4 hours | One provider failing, UI glitch |
 | SEV4 | Cosmetic, no impact | Next sprint | Logo alignment, tooltip text |
 
-### Rollback Procedure
+### Rollback Procedure (Cloud-Agnostic)
+
+**AWS (ECS Fargate):**
 ```bash
-# 1. Identify the bad deployment
-aws ecs describe-services --cluster finmonitor --service backend
-
-# 2. Roll back to previous task definition
 aws ecs update-service --cluster finmonitor --service backend \
-  --task-definition finmonitor-backend:<previous-revision> \
-  --force-new-deployment
-
-# 3. Wait for stable
+  --task-definition finmonitor-backend:<previous-revision> --force-new-deployment
 aws ecs wait services-stable --cluster finmonitor --service backend
-
-# 4. Verify with health check
-curl https://api.finmonitor.example.com/health
 ```
+
+**GCP (Cloud Run):**
+```bash
+gcloud run revisions list --service finmonitor-backend --region us-central1
+gcloud run services update-traffic finmonitor-backend \
+  --to-revisions=finmonitor-backend-<prev>=100 --region us-central1
+```
+
+**Azure (Container Apps):**
+```bash
+az containerapp revision list -n finmonitor-backend -g finmonitor-rg
+az containerapp ingress traffic set -n finmonitor-backend -g finmonitor-rg \
+  --revision-weight finmonitor-backend--<prev>=100
+```
+
+**Verify (all clouds):** `curl https://api.finmonitor.example.com/health`
 
 - Rollback must complete in <5 minutes
 - Always roll forward if the fix is trivial (< 10 min to deploy)

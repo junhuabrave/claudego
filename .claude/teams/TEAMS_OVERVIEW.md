@@ -169,6 +169,81 @@ Each file is designed to be used as a **CLAUDE.md** or agent instruction file in
 
 ---
 
+## Git Branching Strategy
+
+**Trunk-based development** with short-lived feature branches:
+
+```
+main (protected — requires PR + CI pass + 1 approval)
+  ├── feat/add-redis-cache         (Backend — max 3 days)
+  ├── fix/websocket-reconnect      (Frontend — max 2 days)
+  ├── infra/github-actions-ci      (DevOps — max 3 days)
+  └── security/rate-limiting       (Auth — max 3 days)
+```
+
+**Rules:**
+- `main` is always deployable — never push directly
+- Branch naming: `<type>/<short-description>` where type is `feat`, `fix`, `infra`, `security`, `test`, `docs`
+- Feature branches live max 3 days — break large work into smaller PRs
+- Rebase on `main` before merging — no merge commits
+- Delete branches after merge
+
+## Code Review Process
+
+| PR Type | Required Approvals | Reviewers |
+|---------|-------------------|-----------|
+| Feature (new endpoint, component) | 1 from own team + 1 from affected team | Backend ↔ Frontend for API changes |
+| Security-related (auth, CORS, headers) | 1 from Auth team (mandatory) | Auth team reviews ALL security PRs |
+| Database migration | 1 from Backend + 1 from Auth (if `users` table) | Backend + Auth |
+| Infrastructure / CI-CD | 1 from DevOps team | DevOps |
+| Test-only changes | 1 from any team | Test Engineering preferred |
+| Docs-only changes | 1 from any team | Anyone |
+
+**Review expectations:**
+- Respond to review requests within 4 business hours
+- Use "Approve", "Request Changes", or "Comment" — no silent approvals
+- Check the PR checklist from the relevant team standards file
+- Run tests locally before approving if CI is not yet set up
+
+## Database Naming Conventions
+
+- **Table names**: plural snake_case (`users`, `price_alerts`, `news_articles`)
+- **Column names**: snake_case (`user_id`, `created_at`, `is_active`)
+- **Foreign keys**: `<referenced_table_singular>_id` (e.g., `user_id`, `ipo_event_id`)
+- **Indexes**: auto-named by SQLAlchemy, manual names as `ix_<table>_<column>`
+- **Unique constraints**: `uq_<table>_<columns>` (e.g., `uq_user_watchlist_user_id_symbol`)
+- **Boolean columns**: prefix with `is_` or `has_` (`is_active`, `is_public`, `has_premium`)
+- **Timestamps**: always `DateTime(timezone=True)` with `server_default=func.now()`
+
+## API Error Response Format
+
+All API errors return this shape (enforced by FastAPI's `HTTPException`):
+```json
+{
+  "detail": "Human-readable error message"
+}
+```
+
+For validation errors (422), FastAPI returns:
+```json
+{
+  "detail": [
+    {
+      "loc": ["body", "field_name"],
+      "msg": "field required",
+      "type": "value_error.missing"
+    }
+  ]
+}
+```
+
+**Rules:**
+- Error messages must be user-safe — no stack traces, SQL errors, or internal paths
+- Use consistent HTTP status codes across all endpoints (see backend-python.md)
+- Frontend should handle both shapes (string detail and array detail)
+
+---
+
 ## Communication Channels (Recommended)
 
 - **Weekly sync**: All teams — 30 min standup on scaling progress

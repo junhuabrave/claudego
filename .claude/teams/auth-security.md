@@ -152,11 +152,13 @@ jwt_secret_key: str = "change-me-in-production"  # BAD
 # Required headers for production
 add_header X-Content-Type-Options "nosniff" always;
 add_header X-Frame-Options "DENY" always;
-add_header X-XSS-Protection "1; mode=block" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' wss: https://finnhub.io https://www.alphavantage.co; font-src 'self'" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' wss: https://finnhub.io https://www.alphavantage.co https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self'" always;
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+# NOTE: Do NOT add X-XSS-Protection — it is deprecated in modern browsers
+# and can introduce vulnerabilities in IE. CSP provides better XSS protection.
 ```
 
 ### CORS Configuration
@@ -208,7 +210,7 @@ CORS_ORIGINS = {
 - [ ] **Add refresh tokens**: 15-min access tokens + 30-day refresh tokens
 - [ ] **Audit CSP headers**: Ensure Content-Security-Policy is correctly set in nginx
 - [ ] **Add login attempt limiting**: Max 5 failed Google OAuth attempts per IP per hour
-- [ ] **Implement token revocation**: Redis-based blocklist for logout and password changes
+- [ ] **Implement token revocation**: Redis-based blocklist for logout and account re-linking
 - [ ] **Add security headers**: All HTTP security headers in nginx configs
 - [ ] **Symbol input validation**: Regex validation on all ticker symbol inputs
 - [ ] **API payload size limits**: Max 1MB request body, max 500 char strings

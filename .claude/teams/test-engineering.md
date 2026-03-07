@@ -93,27 +93,34 @@ async def db_session(db_engine):
 @pytest_asyncio.fixture
 async def client(db_session):
     """Test client with DB dependency override."""
-    app_copy = FastAPI()
-    app_copy.include_router(router, prefix="/api")
-    app_copy.include_router(auth_router, prefix="/api/auth")
-    app_copy.dependency_overrides[get_db] = lambda: db_session
-    async with AsyncClient(transport=ASGITransport(app=app_copy), base_url="http://test") as ac:
+    test_app = FastAPI()
+    test_app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+    test_app.include_router(auth_router, prefix="/api")
+    test_app.include_router(api_router, prefix="/api")
+
+    # IMPORTANT: use async generator for the override, not a lambda
+    async def override_get_db():
+        yield db_session
+
+    test_app.dependency_overrides[get_db] = override_get_db
+    async with AsyncClient(transport=ASGITransport(app=test_app), base_url="http://test") as ac:
         yield ac
 ```
 
 #### Auth Test Helpers
 ```python
-# Anonymous user — sends X-Session-ID header
-def anon_headers(session_id: str = "test-session-123") -> dict:
+# Anonymous user — sends X-Session-ID header (no default — always pass explicitly)
+def anon_headers(session_id: str) -> dict:
     return {"X-Session-ID": session_id}
 
-# Authenticated user — sends Bearer token
-def auth_headers(user_id: int) -> dict:
-    token = jwt.encode(
-        {"sub": str(user_id), "exp": datetime.utcnow() + timedelta(days=1)},
-        "test-secret", algorithm="HS256"
-    )
+# Authenticated user — pass a pre-created JWT token string
+def auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+# To generate a test token, use the app's auth helper:
+from app.core.auth import create_access_token
+token = create_access_token(user_id=42)
+headers = auth_headers(token)
 ```
 
 #### Test Pattern
@@ -332,6 +339,7 @@ export default function () {
 
 ## Running Tests
 
+### Local (bare-metal)
 ```bash
 # Backend
 cd backend
@@ -354,6 +362,27 @@ cd tests/load
 k6 run k6/smoke.js                         # smoke test
 k6 run k6/load.js                          # load test
 ```
+
+### In Docker (CI-consistent — use this to verify before pushing)
+```bash
+# Backend tests in Docker (matches CI environment)
+docker run --rm -v $(pwd)/backend:/app -w /app python:3.11-slim \
+  sh -c "pip install -r requirements.txt && pytest tests/ -v --cov=app"
+
+# Frontend tests in Docker
+docker run --rm -v $(pwd)/frontend:/app -w /app node:20-alpine \
+  sh -c "npm ci && npm test -- --coverage --watchAll=false"
+
+# Full stack E2E (requires docker-compose)
+docker compose up -d
+cd tests/e2e && npx playwright test
+docker compose down
+```
+
+### Testing Caveats
+- **SQLite vs PostgreSQL**: Tests use in-memory SQLite but production uses PostgreSQL. Some features like `on_conflict_do_nothing` (PostgreSQL dialect) need workarounds in tests. Always verify new DB-specific features work in both environments.
+- **No scheduler in tests**: The test FastAPI app skips lifespan events (no APScheduler). Test scheduler functions directly by calling them as async functions.
+- **Mocked external APIs**: Never hit real Finnhub/Alpha Vantage/Google APIs in tests. Use `unittest.mock.AsyncMock` and `patch()`.
 
 ---
 
