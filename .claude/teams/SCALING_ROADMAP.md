@@ -52,7 +52,7 @@ FinMonitor is a real-time financial markets monitoring platform. This document d
 |------|----------|------|
 | Add Redis cache for quotes (30s TTL) and news (60s TTL) | P0 | 3 |
 | Configure DB connection pool (pool_size=20, max_overflow=10) | P0 | 1 |
-| Add /health and /ready endpoints | P0 | 1 |
+| Add /ready endpoint (/health already exists in main.py) | P0 | 0.5 |
 | Add structured logging (structlog, JSON output) | P1 | 2 |
 | Add request ID middleware | P1 | 1 |
 | Add cursor-based pagination to /news and /ipos | P1 | 2 |

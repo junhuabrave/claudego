@@ -313,7 +313,7 @@ export default function () {
 
 ### Phase 1: Foundation
 - [ ] Increase backend test coverage to 80%+ (add tests for chat, scheduler, providers, news, IPOs)
-- [ ] Add frontend component tests for all components (WatchList, NewsFeed, ChatBox, IPOCalendar)
+- [ ] Add frontend component tests for untested components: WatchList, NewsFeed, ChatBox, IPOCalendar, StatusBar, StockChartDialog, SetNameDialog (currently only AlertsDialog, AuthContext, UserMenu have tests)
 - [ ] Set up Playwright E2E framework with 5 core flow tests
 - [ ] Create k6 smoke test script that runs in CI on every PR
 - [ ] Add test coverage reporting to CI (codecov or similar)
