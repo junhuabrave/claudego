@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.auth import create_access_token, decode_access_token
+from app.core.config import settings
 from app.models.models import User, UserWatchlist
 from tests.conftest import anon_headers, auth_headers
 
@@ -27,7 +28,8 @@ VERIFY_PATCH = "app.api.auth.id_token.verify_oauth2_token"
 # ---------------------------------------------------------------------------
 
 async def google_login(client, session_id: str = "anon-sess-001"):
-    with patch(VERIFY_PATCH, return_value=FAKE_ID_INFO):
+    with patch(VERIFY_PATCH, return_value=FAKE_ID_INFO), \
+         patch.object(settings, "google_client_id", "fake-client-id"):
         resp = await client.post(
             "/api/auth/google",
             json={"credential": "fake-google-token", "session_id": session_id},
@@ -50,7 +52,8 @@ async def test_google_login_creates_new_user(client):
 
 
 async def test_google_login_invalid_token_returns_401(client):
-    with patch(VERIFY_PATCH, side_effect=ValueError("bad token")):
+    with patch(VERIFY_PATCH, side_effect=ValueError("bad token")), \
+         patch.object(settings, "google_client_id", "fake-client-id"):
         resp = await client.post(
             "/api/auth/google",
             json={"credential": "invalid", "session_id": "sess-x"},

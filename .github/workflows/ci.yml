@@ -36,6 +36,9 @@ jobs:
   test-backend:
     name: Test — Backend (pytest)
     runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,12 +48,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r backend/requirements.txt pytest-cov pytest-timeout
 
-      # test_auth.py has pre-existing Google OAuth mock failures (TODO #10).
-      # Excluded here until the auth team fixes the fixture — tracked in TODO.md.
       - name: Run tests
         run: |
           cd backend && pytest tests/ \
-            --ignore=tests/test_auth.py \
             --cov=app \
             --cov-report=xml \
             --cov-report=term-missing \
