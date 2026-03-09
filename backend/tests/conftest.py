@@ -13,7 +13,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.auth import router as auth_router
 from app.api.routes import router as api_router
+from app.core.auth import create_access_token
 from app.core.database import Base, get_db
+from app.models.models import User
 
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -79,3 +81,20 @@ def anon_headers(session_id: str) -> dict:
 
 def auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest_asyncio.fixture
+async def google_auth_headers(db_session) -> dict:
+    """
+    Creates a Google-authenticated User in the test DB and returns the
+    corresponding Bearer auth headers.
+
+    Use this fixture for Tier 2 endpoints that require require_google_user
+    (e.g. reminders). Use anon_headers() for Tier 1 endpoints.
+    """
+    user = User(google_id="test-google-id-fixture", email="fixture@example.com")
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    token = create_access_token(user.id)
+    return auth_headers(token)

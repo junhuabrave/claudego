@@ -25,7 +25,7 @@ class UserResponse(BaseModel):
 
 
 class UserUpdate(BaseModel):
-    display_name: str | None = None
+    display_name: str | None = Field(default=None, max_length=100)
 
 
 # --- Price Alerts ---
@@ -55,7 +55,8 @@ class PriceAlertResponse(BaseModel):
 
 # --- Ticker ---
 class TickerCreate(BaseModel):
-    symbol: str
+    # Auth team confirmed pattern — accepts upper and lower case (route normalises to upper)
+    symbol: str = Field(pattern=r"^[\^]?[A-Za-z0-9.-]{1,20}$")
     name: str = ""
     exchange: str = ""
 
@@ -136,7 +137,7 @@ class ReminderResponse(BaseModel):
 
 # --- Chat ---
 class ChatMessage(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=500)
 
 
 class ChatResponse(BaseModel):
