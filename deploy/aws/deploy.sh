@@ -51,7 +51,7 @@ echo "=== Running DB migrations ==="
 MIGRATION_TASK_ARN=$(aws ecs run-task \
   --cluster "$CLUSTER_NAME" \
   --task-definition "$TASK_FAMILY" \
-  --overrides '{"containerOverrides":[{"name":"app","command":["alembic","upgrade","head"]}]}' \
+  --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
   --launch-type FARGATE \
   --network-configuration "$NETWORK_CONFIG" \
   --region "$AWS_REGION" \

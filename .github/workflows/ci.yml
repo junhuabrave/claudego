@@ -172,10 +172,18 @@ jobs:
         run: |
           NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS }}],assignPublicIp=ENABLED}"
 
+          # Resolve container name from live task definition — avoids hardcoding
+          BACKEND_CONTAINER=$(aws ecs describe-task-definition \
+            --task-definition $TASK_FAMILY \
+            --region $AWS_REGION \
+            --query 'taskDefinition.containerDefinitions[0].name' \
+            --output text)
+          echo "Running migration in container: $BACKEND_CONTAINER"
+
           TASK_ARN=$(aws ecs run-task \
             --cluster $CLUSTER_NAME \
             --task-definition $TASK_FAMILY \
-            --overrides '{"containerOverrides":[{"name":"backend","command":["alembic","upgrade","head"]}]}' \
+            --overrides "{\"containerOverrides\":[{\"name\":\"$BACKEND_CONTAINER\",\"command\":[\"alembic\",\"upgrade\",\"head\"]}]}" \
             --launch-type FARGATE \
             --network-configuration "$NETWORK_CONFIG" \
             --region $AWS_REGION \
