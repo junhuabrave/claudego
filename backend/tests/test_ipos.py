@@ -129,7 +129,7 @@ async def test_list_ipos_does_not_require_auth(client):
 # POST /api/reminders
 # ---------------------------------------------------------------------------
 
-async def test_create_reminder_for_existing_ipo(client, db_session):
+async def test_create_reminder_for_existing_ipo(client, db_session, google_auth_headers):
     ipo = _make_ipo("ipo-rem-1")
     db_session.add(ipo)
     await db_session.commit()
@@ -143,6 +143,7 @@ async def test_create_reminder_for_existing_ipo(client, db_session):
             "notify_address": "test@example.com",
             "remind_before_hours": 24,
         },
+        headers=google_auth_headers,
     )
     assert resp.status_code == 201
     data = resp.json()
@@ -151,7 +152,7 @@ async def test_create_reminder_for_existing_ipo(client, db_session):
     assert data["sent"] is False
 
 
-async def test_create_reminder_missing_ipo_returns_404(client):
+async def test_create_reminder_missing_ipo_returns_404(client, google_auth_headers):
     resp = await client.post(
         "/api/reminders",
         json={
@@ -159,11 +160,12 @@ async def test_create_reminder_missing_ipo_returns_404(client):
             "notify_via": "email",
             "notify_address": "test@example.com",
         },
+        headers=google_auth_headers,
     )
     assert resp.status_code == 404
 
 
-async def test_create_reminder_invalid_notify_via_returns_400(client, db_session):
+async def test_create_reminder_invalid_notify_via_returns_400(client, db_session, google_auth_headers):
     ipo = _make_ipo("ipo-rem-bad")
     db_session.add(ipo)
     await db_session.commit()
@@ -176,6 +178,7 @@ async def test_create_reminder_invalid_notify_via_returns_400(client, db_session
             "notify_via": "sms",
             "notify_address": "+1234567890",
         },
+        headers=google_auth_headers,
     )
     assert resp.status_code == 400
 
@@ -184,7 +187,7 @@ async def test_create_reminder_invalid_notify_via_returns_400(client, db_session
 # GET /api/reminders
 # ---------------------------------------------------------------------------
 
-async def test_list_reminders_returns_all(client, db_session):
+async def test_list_reminders_returns_all(client, db_session, google_auth_headers):
     ipo = _make_ipo("ipo-rem-list")
     db_session.add(ipo)
     await db_session.commit()
@@ -193,13 +196,15 @@ async def test_list_reminders_returns_all(client, db_session):
     await client.post(
         "/api/reminders",
         json={"ipo_event_id": ipo.id, "notify_via": "email", "notify_address": "a@b.com"},
+        headers=google_auth_headers,
     )
     await client.post(
         "/api/reminders",
         json={"ipo_event_id": ipo.id, "notify_via": "pagerduty", "notify_address": "pd-key"},
+        headers=google_auth_headers,
     )
 
-    resp = await client.get("/api/reminders")
+    resp = await client.get("/api/reminders", headers=google_auth_headers)
     assert resp.status_code == 200
     assert len(resp.json()) == 2
 
@@ -208,7 +213,7 @@ async def test_list_reminders_returns_all(client, db_session):
 # DELETE /api/reminders/{id}
 # ---------------------------------------------------------------------------
 
-async def test_delete_reminder_removes_row(client, db_session):
+async def test_delete_reminder_removes_row(client, db_session, google_auth_headers):
     ipo = _make_ipo("ipo-rem-del")
     db_session.add(ipo)
     await db_session.commit()
@@ -217,16 +222,33 @@ async def test_delete_reminder_removes_row(client, db_session):
     create_resp = await client.post(
         "/api/reminders",
         json={"ipo_event_id": ipo.id, "notify_via": "email", "notify_address": "a@b.com"},
+        headers=google_auth_headers,
     )
     reminder_id = create_resp.json()["id"]
 
-    resp = await client.delete(f"/api/reminders/{reminder_id}")
+    resp = await client.delete(f"/api/reminders/{reminder_id}", headers=google_auth_headers)
     assert resp.status_code == 204
 
     result = await db_session.execute(select(Reminder).where(Reminder.id == reminder_id))
     assert result.scalar_one_or_none() is None
 
 
-async def test_delete_reminder_nonexistent_returns_404(client):
-    resp = await client.delete("/api/reminders/9999")
+async def test_delete_reminder_nonexistent_returns_404(client, google_auth_headers):
+    resp = await client.delete("/api/reminders/9999", headers=google_auth_headers)
     assert resp.status_code == 404
+
+
+async def test_reminders_require_google_auth_anonymous_rejected(client):
+    """Tier 2 guard: anonymous sessions must get 403, not 200."""
+    resp = await client.post(
+        "/api/reminders",
+        json={"ipo_event_id": 1, "notify_via": "email", "notify_address": "x@y.com"},
+        headers={"X-Session-ID": "anon-session-id"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_reminders_require_google_auth_no_headers_rejected(client):
+    """Tier 2 guard: no credentials at all must get 401."""
+    resp = await client.get("/api/reminders")
+    assert resp.status_code == 401
