@@ -4,7 +4,7 @@ import type { User } from "../types";
 const TOKEN_KEY = "finmonitor_token";
 const SESSION_KEY = "finmonitor_session_id";
 
-interface AuthContextValue {
+export interface AuthContextValue {
   user: User | null;
   isAuthenticated: boolean;
   isLoading: boolean;

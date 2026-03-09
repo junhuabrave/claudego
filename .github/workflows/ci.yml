@@ -1,0 +1,250 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  lint-backend:
+    name: Lint — Backend (ruff + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install ruff mypy
+      - run: ruff check backend/app
+      - run: cd backend && mypy app/ --ignore-missing-imports
+
+  lint-frontend:
+    name: Lint — Frontend (tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci --legacy-peer-deps
+      - run: cd frontend && npx tsc --noEmit
+
+  test-backend:
+    name: Test — Backend (pytest)
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt pytest-cov pytest-timeout
+
+      - name: Run tests
+        run: |
+          cd backend && pytest tests/ \
+            --cov=app \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=70 \
+            --junitxml=junit.xml \
+            -q
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Backend Tests
+          path: backend/junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-coverage
+          path: backend/coverage.xml
+          retention-days: 7
+
+      - uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          file: backend/coverage.xml
+          fail_ci_if_error: false
+
+  test-frontend:
+    name: Test — Frontend (jest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: cd frontend && npm ci --legacy-peer-deps
+      - run: cd frontend && npm test -- --coverage --watchAll=false
+        env:
+          CI: true
+
+  build:
+    name: Build — Docker images
+    needs: [lint-backend, lint-frontend, test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        run: docker build -t finmonitor-backend:${{ github.sha }} ./backend
+      - name: Build frontend image
+        run: |
+          docker build \
+            -t finmonitor-frontend:${{ github.sha }} \
+            --build-arg NGINX_CONF=nginx.prod.conf \
+            ./frontend
+
+  deploy:
+    name: Deploy — AWS ECS
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      CLUSTER_NAME: finmonitor
+      SERVICE_NAME: finmonitor-service
+      TASK_FAMILY: finmonitor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set ECR registry
+        run: |
+          echo "ECR_REGISTRY=${{ steps.ecr-login.outputs.registry }}" >> $GITHUB_ENV
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.ECR_REGISTRY }}/finmonitor-backend:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/finmonitor-backend:latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            REACT_APP_API_URL=/api
+            REACT_APP_WS_URL=${{ secrets.REACT_APP_WS_URL }}
+            REACT_APP_GOOGLE_CLIENT_ID=${{ secrets.REACT_APP_GOOGLE_CLIENT_ID }}
+            NGINX_CONF=nginx.prod.conf
+          tags: |
+            ${{ env.ECR_REGISTRY }}/finmonitor-frontend:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/finmonitor-frontend:latest
+
+      - name: Compact Secrets Manager JSON (prevent ECS \n parse error)
+        run: |
+          SECRET_ID="finmonitor/config"
+          COMPACT=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_ID" \
+            --region $AWS_REGION \
+            --query SecretString \
+            --output text | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)))")
+          aws secretsmanager put-secret-value \
+            --secret-id "$SECRET_ID" \
+            --region $AWS_REGION \
+            --secret-string "$COMPACT"
+          echo "Secret re-saved as single-line JSON."
+
+      - name: Run DB migrations
+        run: |
+          NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS }}],assignPublicIp=ENABLED}"
+
+          # Resolve container name from live task definition — avoids hardcoding
+          BACKEND_CONTAINER=$(aws ecs describe-task-definition \
+            --task-definition $TASK_FAMILY \
+            --region $AWS_REGION \
+            --query 'taskDefinition.containerDefinitions[0].name' \
+            --output text)
+          echo "Running migration in container: $BACKEND_CONTAINER"
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster $CLUSTER_NAME \
+            --task-definition $TASK_FAMILY \
+            --overrides "{\"containerOverrides\":[{\"name\":\"$BACKEND_CONTAINER\",\"command\":[\"alembic\",\"upgrade\",\"head\"]}]}" \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --region $AWS_REGION \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task: $TASK_ARN — waiting..."
+          aws ecs wait tasks-stopped \
+            --cluster $CLUSTER_NAME \
+            --tasks $TASK_ARN \
+            --region $AWS_REGION
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster $CLUSTER_NAME \
+            --tasks $TASK_ARN \
+            --region $AWS_REGION \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed (exit $EXIT_CODE). Aborting deploy."
+            exit 1
+          fi
+          echo "Migrations applied successfully."
+
+      - name: Update ALB health check to /ready
+        run: |
+          aws elbv2 modify-target-group \
+            --target-group-arn ${{ secrets.TARGET_GROUP_ARN }} \
+            --health-check-path /ready \
+            --health-check-interval-seconds 10 \
+            --healthy-threshold-count 2 \
+            --unhealthy-threshold-count 3 \
+            --region $AWS_REGION
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $TASK_FAMILY \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+          echo "Waiting for service to stabilise..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME \
+            --region $AWS_REGION
+          echo "Deploy complete — https://d1yleiq0s9sk4n.cloudfront.net"

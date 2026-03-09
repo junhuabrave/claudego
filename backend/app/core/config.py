@@ -1,4 +1,9 @@
+import sys
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+_DEFAULT_JWT_SECRET = "change-me-in-production"
 
 
 class Settings(BaseSettings):
@@ -46,6 +51,19 @@ class Settings(BaseSettings):
     alert_cooldown_minutes: int = 60       # min minutes between re-firing same alert
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def _validate_secrets(self) -> "Settings":
+        """Prevent startup with insecure defaults in non-development environments."""
+        if self.app_env != "development" and self.jwt_secret_key == _DEFAULT_JWT_SECRET:
+            print(  # noqa: T201 — intentional, logging not yet configured at import time
+                "FATAL: JWT_SECRET_KEY is set to the default placeholder value. "
+                "Generate a secure secret with: openssl rand -hex 32\n"
+                "Set it via the JWT_SECRET_KEY environment variable or .env file.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        return self
 
 
 settings = Settings()

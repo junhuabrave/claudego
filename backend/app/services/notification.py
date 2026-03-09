@@ -2,6 +2,7 @@
 
 import logging
 import smtplib
+import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -57,8 +58,9 @@ async def send_email_alert(to_address: str, subject: str, body: str) -> bool:
     msg.attach(MIMEText(body, "html"))
 
     try:
+        tls_context = ssl.create_default_context()
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            server.starttls()
+            server.starttls(context=tls_context)
             server.login(settings.smtp_user, settings.smtp_password)
             server.sendmail(settings.email_from, [to_address], msg.as_string())
         logger.info("Email sent to %s: %s", to_address, subject)

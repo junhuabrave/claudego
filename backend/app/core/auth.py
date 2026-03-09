@@ -1,4 +1,4 @@
-"""JWT helpers and get_current_user FastAPI dependency."""
+"""JWT helpers and FastAPI auth dependencies."""
 
 import datetime
 import logging
@@ -75,3 +75,26 @@ async def get_current_user(
         logger.info("Created anonymous user session_id=%s id=%d", session_id, user.id)
 
     return user
+
+
+async def require_google_user(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """
+    Stricter dependency for endpoints that must not be accessible to anonymous
+    sessions. Raises 403 if the user has not completed Google OAuth.
+
+    Use instead of get_current_user on any endpoint that:
+    - Stores persistent records tied to a real identity (e.g. reminders)
+    - Sends notifications to user-supplied addresses
+    - Should survive beyond a single browser session
+
+    Usage:
+        current_user: User = Depends(require_google_user)
+    """
+    if current_user.google_id is None:
+        raise HTTPException(
+            status_code=403,
+            detail="This action requires a Google-authenticated account.",
+        )
+    return current_user

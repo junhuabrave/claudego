@@ -16,7 +16,7 @@
 | 7 | Optimize Dockerfiles (multi-stage, non-root, .dockerignore) | P0 | DevOps | Pending |
 | 8 | Add frontend ErrorBoundary component | P1 | Frontend | Pending |
 | 9 | Add input validation regex for ticker symbols | P1 | Security | Pending |
-| 10 | Fix pre-existing test_auth.py failures (Google OAuth mock) | P1 | Testing | Pending |
+| 10 | Fix pre-existing test_auth.py failures (Google OAuth mock) | P1 | Testing | Done |
 
 ---
 
@@ -69,7 +69,6 @@
 - Reject invalid symbols at API boundary (422 response)
 - Add frontend input validation to match
 
-### 10. Fix test_auth.py Failures
-- Google OAuth mock setup is incomplete in test fixtures
-- Fix mock configuration so auth tests pass reliably
-- Ensure CI pipeline won't be blocked by these failures
+### 10. Fix test_auth.py Failures ✓ Done
+- Patched `settings.google_client_id` alongside `verify_oauth2_token` mock so tests bypass the 503 guard
+- `--ignore=tests/test_auth.py` removed from CI; all auth tests now run

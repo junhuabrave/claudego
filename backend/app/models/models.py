@@ -124,6 +124,7 @@ class Reminder(Base):
     __tablename__ = "reminders"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     ipo_event_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     notify_via: Mapped[str] = mapped_column(String(20), nullable=False)  # "email" | "pagerduty"
     notify_address: Mapped[str] = mapped_column(String(255), nullable=False)
