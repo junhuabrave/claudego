@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # AWS ECS Fargate deployment script
 # Prerequisites: AWS CLI configured, ECR repos created, ECS cluster exists
+#
+# All required environment variables are documented in deploy/aws/.env.example
+# Quick start:
+#   cp deploy/aws/.env.example deploy/aws/.env   # fill in values
+#   set -a && source deploy/aws/.env && set +a
+#   bash deploy/aws/deploy.sh
 set -euo pipefail
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
