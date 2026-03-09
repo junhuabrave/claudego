@@ -16,6 +16,7 @@ WORKDIR /app
 # Copy venv from builder (world-readable, accessible by any user)
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONPATH=/app
 
 # Copy only application code (tests excluded via .dockerignore)
 COPY app/ ./app/
