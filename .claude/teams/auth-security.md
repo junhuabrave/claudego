@@ -156,11 +156,18 @@ add_header X-Content-Type-Options "nosniff" always;
 add_header X-Frame-Options "DENY" always;
 add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' wss: https://finnhub.io https://www.alphavantage.co https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self'" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' https://accounts.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self' https://accounts.google.com; frame-src https://accounts.google.com; font-src 'self'" always;
 add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
 # NOTE: Do NOT add X-XSS-Protection — it is deprecated in modern browsers
 # and can introduce vulnerabilities in IE. CSP provides better XSS protection.
+
+# connect-src notes:
+#   - 'self' covers all /api/* REST calls and /api/ws WebSocket (same-origin via proxy)
+#   - wss: wildcard intentionally excluded — 'self' is tighter and sufficient
+#   - finnhub.io and alphavantage.co intentionally excluded — backend-only, browser
+#     never calls these directly
+#   - style-src 'unsafe-inline' required by MUI/emotion; remove in Phase 2 (Vite + nonce)
 ```
 
 ### CORS Configuration
