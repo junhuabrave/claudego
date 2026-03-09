@@ -111,3 +111,118 @@ jobs:
             -t finmonitor-frontend:${{ github.sha }} \
             --build-arg NGINX_CONF=nginx.prod.conf \
             ./frontend
+
+  deploy:
+    name: Deploy — AWS ECS
+    needs: [build]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+    env:
+      AWS_REGION: us-east-1
+      CLUSTER_NAME: finmonitor
+      SERVICE_NAME: finmonitor-service
+      TASK_FAMILY: finmonitor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set ECR registry
+        run: |
+          echo "ECR_REGISTRY=${{ steps.ecr-login.outputs.registry }}" >> $GITHUB_ENV
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.ECR_REGISTRY }}/finmonitor-backend:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/finmonitor-backend:latest
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            REACT_APP_API_URL=/api
+            REACT_APP_WS_URL=${{ secrets.REACT_APP_WS_URL }}
+            REACT_APP_GOOGLE_CLIENT_ID=${{ secrets.REACT_APP_GOOGLE_CLIENT_ID }}
+            NGINX_CONF=nginx.prod.conf
+          tags: |
+            ${{ env.ECR_REGISTRY }}/finmonitor-frontend:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/finmonitor-frontend:latest
+
+      - name: Run DB migrations
+        run: |
+          NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS }}],assignPublicIp=ENABLED}"
+
+          TASK_ARN=$(aws ecs run-task \
+            --cluster $CLUSTER_NAME \
+            --task-definition $TASK_FAMILY \
+            --overrides '{"containerOverrides":[{"name":"app","command":["alembic","upgrade","head"]}]}' \
+            --launch-type FARGATE \
+            --network-configuration "$NETWORK_CONFIG" \
+            --region $AWS_REGION \
+            --query 'tasks[0].taskArn' \
+            --output text)
+
+          echo "Migration task: $TASK_ARN — waiting..."
+          aws ecs wait tasks-stopped \
+            --cluster $CLUSTER_NAME \
+            --tasks $TASK_ARN \
+            --region $AWS_REGION
+
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster $CLUSTER_NAME \
+            --tasks $TASK_ARN \
+            --region $AWS_REGION \
+            --query 'tasks[0].containers[0].exitCode' \
+            --output text)
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed (exit $EXIT_CODE). Aborting deploy."
+            exit 1
+          fi
+          echo "Migrations applied successfully."
+
+      - name: Update ALB health check to /ready
+        run: |
+          aws elbv2 modify-target-group \
+            --target-group-arn ${{ secrets.TARGET_GROUP_ARN }} \
+            --health-check-path /ready \
+            --health-check-interval-seconds 10 \
+            --healthy-threshold-count 2 \
+            --unhealthy-threshold-count 3 \
+            --region $AWS_REGION
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --task-definition $TASK_FAMILY \
+            --force-new-deployment \
+            --region $AWS_REGION
+
+          echo "Waiting for service to stabilise..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME \
+            --region $AWS_REGION
+          echo "Deploy complete — https://d1yleiq0s9sk4n.cloudfront.net"
