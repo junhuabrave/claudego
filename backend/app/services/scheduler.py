@@ -150,7 +150,7 @@ async def check_price_alerts(quotes: list[dict]) -> None:
             triggered_ids.append(alert.id)
             broadcasts.append({
                 "alert_id": alert.id,
-                "user_id": alert.user_id,
+                # user_id intentionally excluded — broadcast reaches ALL connected clients
                 "symbol": alert.symbol,
                 "threshold_pct": alert.threshold_pct,
                 "direction": alert.direction,

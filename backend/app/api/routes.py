@@ -1,12 +1,13 @@
 """API routes for the financial monitoring system."""
 
 import datetime
+import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_google_user
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.models import (
@@ -35,6 +36,7 @@ from app.schemas.schemas import (
 from app.services.chat import parse_chat_message
 from app.services.websocket_manager import ws_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -124,7 +126,7 @@ async def remove_ticker(
 
 @router.get("/news", response_model=list[NewsArticleResponse])
 async def list_news(
-    limit: int = 50,
+    limit: int = Query(default=50, ge=1, le=200),
     category: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
@@ -156,27 +158,47 @@ async def list_ipos(db: AsyncSession = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @router.post("/reminders", response_model=ReminderResponse, status_code=201)
-async def create_reminder(payload: ReminderCreate, db: AsyncSession = Depends(get_db)):
+async def create_reminder(
+    payload: ReminderCreate,
+    current_user: User = Depends(require_google_user),
+    db: AsyncSession = Depends(get_db),
+):
     ipo = await db.execute(select(IPOEvent).where(IPOEvent.id == payload.ipo_event_id))
     if not ipo.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="IPO event not found")
     if payload.notify_via not in ("email", "pagerduty"):
         raise HTTPException(status_code=400, detail="notify_via must be 'email' or 'pagerduty'")
-    reminder = Reminder(**payload.model_dump())
+    reminder = Reminder(**payload.model_dump(), user_id=current_user.id)
     db.add(reminder)
     await db.flush()
     return reminder
 
 
 @router.get("/reminders", response_model=list[ReminderResponse])
-async def list_reminders(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Reminder).order_by(Reminder.created_at.desc()))
+async def list_reminders(
+    current_user: User = Depends(require_google_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Reminder)
+        .where(Reminder.user_id == current_user.id)
+        .order_by(Reminder.created_at.desc())
+    )
     return result.scalars().all()
 
 
 @router.delete("/reminders/{reminder_id}", status_code=204)
-async def delete_reminder(reminder_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(delete(Reminder).where(Reminder.id == reminder_id))
+async def delete_reminder(
+    reminder_id: int,
+    current_user: User = Depends(require_google_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        delete(Reminder).where(
+            Reminder.id == reminder_id,
+            Reminder.user_id == current_user.id,
+        )
+    )
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Reminder not found")
     return None
@@ -327,7 +349,11 @@ def _yf_params(resolution: str, days: int) -> tuple[str, str]:
 
 
 @router.get("/candles/{symbol}")
-async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
+async def get_candles(
+    symbol: str,
+    resolution: str = "5",
+    days: int = Query(default=1, ge=1, le=365),
+):
     """Fetch OHLCV candle data via Yahoo Finance. No API key required."""
     import asyncio
 
@@ -343,8 +369,9 @@ async def get_candles(symbol: str, resolution: str = "5", days: int = 1):
         hist = await asyncio.get_event_loop().run_in_executor(
             None, lambda: ticker_obj.history(period=period, interval=interval)
         )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception:
+        logger.exception("Failed to fetch candles for symbol=%s", symbol.upper())
+        raise HTTPException(status_code=502, detail="Failed to fetch market data")
 
     if hist is None or hist.empty:
         return []
