@@ -168,6 +168,20 @@ jobs:
             ${{ env.ECR_REGISTRY }}/finmonitor-frontend:${{ github.sha }}
             ${{ env.ECR_REGISTRY }}/finmonitor-frontend:latest
 
+      - name: Compact Secrets Manager JSON (prevent ECS \n parse error)
+        run: |
+          SECRET_ID="finmonitor/config"
+          COMPACT=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_ID" \
+            --region $AWS_REGION \
+            --query SecretString \
+            --output text | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin)))")
+          aws secretsmanager put-secret-value \
+            --secret-id "$SECRET_ID" \
+            --region $AWS_REGION \
+            --secret-string "$COMPACT"
+          echo "Secret re-saved as single-line JSON."
+
       - name: Run DB migrations
         run: |
           NETWORK_CONFIG="awsvpcConfiguration={subnets=[${{ secrets.SUBNET_IDS }}],securityGroups=[${{ secrets.SECURITY_GROUP_IDS }}],assignPublicIp=ENABLED}"
