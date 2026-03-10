@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Box,
   IconButton,
@@ -21,6 +21,18 @@ interface Props {
   onTickerChanged: () => void;
 }
 
+// Mirrors backend: app/services/chat.py  r"(\^?[a-zA-Z0-9][\w.-]{0,14})"
+// Supports: AAPL, ^KS11, VOD.L, 005930.KS
+const TICKER_RE = /^\^?[A-Z0-9][\w.-]{0,14}$/i;
+
+/** Extract the ticker token from an add/remove command, or null if not an add/remove. */
+function extractTicker(text: string): string | null {
+  const m = text.match(
+    /^(?:add|watch|track|follow|remove|delete|unwatch|untrack|unfollow|drop)\s+(\S+)/i
+  );
+  return m ? m[1] : null;
+}
+
 export default function ChatBox({ onTickerChanged }: Props) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -34,6 +46,14 @@ export default function ChatBox({ onTickerChanged }: Props) {
   const listRef = useRef<HTMLUListElement>(null);
   const nextId = useRef(1);
 
+  const tickerError = useMemo<string | null>(() => {
+    const ticker = extractTicker(input.trim());
+    if (ticker && !TICKER_RE.test(ticker)) {
+      return `"${ticker}" doesn't look like a valid symbol`;
+    }
+    return null;
+  }, [input]);
+
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
       if (listRef.current) {
@@ -44,7 +64,7 @@ export default function ChatBox({ onTickerChanged }: Props) {
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || tickerError) return;
 
     const userMsg: Message = { id: nextId.current++, text, from: "user" };
     setMessages((prev) => [...prev, userMsg]);
@@ -128,8 +148,14 @@ export default function ChatBox({ onTickerChanged }: Props) {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={sending}
+          error={!!tickerError}
+          helperText={tickerError}
         />
-        <IconButton color="primary" onClick={handleSend} disabled={!input.trim() || sending}>
+        <IconButton
+          color="primary"
+          onClick={handleSend}
+          disabled={!input.trim() || sending || !!tickerError}
+        >
           <SendIcon />
         </IconButton>
       </Box>

@@ -8,7 +8,7 @@
  */
 
 import React from "react";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AuthProvider, useAuth, getOrCreateSessionId } from "../contexts/AuthContext";
 
@@ -71,11 +71,11 @@ test("AuthContext fetches /auth/me on mount and sets anonymous user", async () =
   mockFetchAnon(42);
   renderWithAuth(<AuthDisplay />);
 
-  await waitFor(() => {
-    expect(screen.getByTestId("authenticated").textContent).toBe("false");
-    expect(screen.getByTestId("user-id").textContent).toBe("42");
-    expect(screen.getByTestId("is-anon").textContent).toBe("true");
-  });
+  await waitFor(() =>
+    expect(screen.getByTestId("authenticated").textContent).toBe("false")
+  );
+  expect(screen.getByTestId("user-id").textContent).toBe("42");
+  expect(screen.getByTestId("is-anon").textContent).toBe("true");
 });
 
 test("logout clears JWT and reloads (via window.location.reload)", async () => {
@@ -94,11 +94,9 @@ test("logout clears JWT and reloads (via window.location.reload)", async () => {
   }
 
   renderWithAuth(<LogoutButton />);
-  await waitFor(() => screen.getByText("logout"));
+  await screen.findByText("logout");
 
-  await act(async () => {
-    await userEvent.click(screen.getByText("logout"));
-  });
+  await userEvent.click(screen.getByText("logout"));
 
   expect(localStorage.getItem("finmonitor_token")).toBeNull();
   expect(reloadMock).toHaveBeenCalled();

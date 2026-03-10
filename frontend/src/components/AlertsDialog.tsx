@@ -109,7 +109,7 @@ export default function AlertsDialog({ open, symbol, onClose }: Props) {
             <Select
               value={direction}
               label="Direction"
-              onChange={(e) => setDirection(e.target.value as any)}
+              onChange={(e) => setDirection(e.target.value as "up" | "down" | "both")}
             >
               <MenuItem value="up">▲ Up</MenuItem>
               <MenuItem value="down">▼ Down</MenuItem>

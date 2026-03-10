@@ -6,7 +6,6 @@
 
 import React from "react";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import AlertsDialog from "../components/AlertsDialog";
 import WatchList from "../components/WatchList";
 import * as api from "../services/api";
@@ -33,25 +32,19 @@ function renderDialog(symbol = "AAPL") {
 test("renders dialog title with correct symbol", async () => {
   jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog("MSFT");
-  await waitFor(() => {
-    expect(screen.getByText(/Price Alerts — MSFT/i)).toBeInTheDocument();
-  });
+  expect(await screen.findByText(/Price Alerts — MSFT/i)).toBeInTheDocument();
 });
 
 test("loads and displays existing alerts", async () => {
   jest.spyOn(api.alertsApi, "list").mockResolvedValue([MOCK_ALERT]);
   renderDialog("AAPL");
-  await waitFor(() => {
-    expect(screen.getByText(/≥ 5%/i)).toBeInTheDocument();
-  });
+  expect(await screen.findByText(/≥ 5%/i)).toBeInTheDocument();
 });
 
 test("shows empty state when no alerts", async () => {
   jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog("AAPL");
-  await waitFor(() => {
-    expect(screen.getByText(/No alerts set for AAPL/i)).toBeInTheDocument();
-  });
+  expect(await screen.findByText(/No alerts set for AAPL/i)).toBeInTheDocument();
 });
 
 test("add alert calls alertsApi.create with correct payload", async () => {
@@ -64,7 +57,7 @@ test("add alert calls alertsApi.create with correct payload", async () => {
   });
 
   renderDialog("AAPL");
-  await waitFor(() => screen.getByText(/No alerts set/i));
+  await screen.findByText(/No alerts set/i);
 
   // Clear default value and type new threshold
   const input = screen.getByLabelText(/Threshold %/i);
@@ -82,7 +75,7 @@ test("add alert calls alertsApi.create with correct payload", async () => {
 test("shows error for threshold > 100", async () => {
   jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog();
-  await waitFor(() => screen.getByLabelText(/Threshold %/i));
+  await screen.findByLabelText(/Threshold %/i);
 
   fireEvent.change(screen.getByLabelText(/Threshold %/i), { target: { value: "999" } });
   fireEvent.click(screen.getByRole("button", { name: /Add/i }));
@@ -95,7 +88,7 @@ test("delete alert calls alertsApi.remove", async () => {
   const removeSpy = jest.spyOn(api.alertsApi, "remove").mockResolvedValue(undefined);
 
   renderDialog("AAPL");
-  await waitFor(() => screen.getByText(/≥ 5%/i));
+  await screen.findByText(/≥ 5%/i);
 
   fireEvent.click(screen.getAllByRole("button", { name: /Delete/i })[0]);
   expect(removeSpy).toHaveBeenCalledWith(1);

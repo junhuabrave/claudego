@@ -2,6 +2,7 @@ import React from "react";
 import { CssBaseline, ThemeProvider, createTheme } from "@mui/material";
 import { GoogleOAuthProvider } from "@react-oauth/google";
 import { AuthProvider } from "./contexts/AuthContext";
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import Dashboard from "./pages/Dashboard";
 
 const theme = createTheme({
@@ -22,7 +23,9 @@ export default function App() {
       <AuthProvider>
         <ThemeProvider theme={theme}>
           <CssBaseline />
-          <Dashboard />
+          <ErrorBoundary>
+            <Dashboard />
+          </ErrorBoundary>
         </ThemeProvider>
       </AuthProvider>
     </GoogleOAuthProvider>

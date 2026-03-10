@@ -16,8 +16,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import AccountCircleIcon from "@mui/icons-material/AccountCircle";
-import { GoogleLogin } from "@react-oauth/google";
+import { GoogleLogin, CredentialResponse } from "@react-oauth/google";
 import { useAuth } from "../contexts/AuthContext";
 import SetNameDialog from "./SetNameDialog";
 
@@ -31,7 +30,8 @@ export default function UserMenu() {
 
   const apiUrl = process.env.REACT_APP_API_URL || "https://localhost:3443/api";
 
-  const handleGoogleSuccess = async (credentialResponse: any) => {
+  const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
+    if (!credentialResponse.credential) return;
     try {
       await login(credentialResponse.credential);
     } catch {

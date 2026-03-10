@@ -12,8 +12,8 @@ import UserMenu from "../components/UserMenu";
 import * as AuthContext from "../contexts/AuthContext";
 
 jest.mock("@react-oauth/google", () => ({
-  GoogleOAuthProvider: ({ children }: any) => <>{children}</>,
-  GoogleLogin: ({ onSuccess }: any) => (
+  GoogleOAuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  GoogleLogin: ({ onSuccess }: { onSuccess: (r: { credential: string }) => void }) => (
     <button data-testid="google-login-btn" onClick={() => onSuccess({ credential: "fake" })}>
       Sign in with Google
     </button>

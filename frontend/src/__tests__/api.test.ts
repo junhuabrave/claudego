@@ -7,10 +7,6 @@
  * Run with: npm test -- --watchAll=false
  */
 
-// We import axios directly to test the shared client instance
-import axios from "axios";
-import MockAdapter from "axios-mock-adapter";
-
 // Re-export the configured client by importing api.ts side-effects
 // (the interceptors register on the module-level 'client' instance)
 import "../services/api";
