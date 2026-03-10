@@ -5,6 +5,21 @@ Scale FinMonitor from a single-developer project to a platform serving **100K–
 
 ---
 
+## Sprint Communications
+
+Active sprint briefs and status reports are in the `sprints/` directory:
+
+| Document | Purpose |
+|----------|---------|
+| [PHASE1_STATUS.md](sprints/PHASE1_STATUS.md) | Engineering Director's Phase 1 audit & next steps |
+| [backend-sprint.md](sprints/backend-sprint.md) | Backend team sprint tasks |
+| [frontend-sprint.md](sprints/frontend-sprint.md) | Frontend team sprint tasks |
+| [auth-security-sprint.md](sprints/auth-security-sprint.md) | Auth/Security team sprint tasks |
+| [test-engineering-sprint.md](sprints/test-engineering-sprint.md) | Test Engineering team sprint tasks |
+| [devops-sprint.md](sprints/devops-sprint.md) | DevOps team sprint tasks |
+
+---
+
 ## Team Structure
 
 | Team | Ownership | Headcount (suggested) |
