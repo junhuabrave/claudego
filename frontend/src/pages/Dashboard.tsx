@@ -3,6 +3,7 @@ import {
   Alert,
   AppBar,
   Box,
+  Chip,
   Container,
   Grid,
   Paper,
@@ -23,6 +24,13 @@ import StatusBar from "../components/StatusBar";
 import StockChartDialog from "../components/StockChartDialog";
 import UserMenu from "../components/UserMenu";
 import WatchList from "../components/WatchList";
+// NOTE: React.lazy() for dialogs deferred to Phase 2 (Vite migration).
+// CRA's Fast Refresh uses flushSync which is incompatible with Suspense on HMR.
+import {
+  IPOCalendarSkeleton,
+  NewsFeedSkeleton,
+  WatchListSkeleton,
+} from "../components/common/LoadingSkeleton";
 import { useAuth } from "../contexts/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { getIPOs, getNews, getTickers, removeTicker } from "../services/api";
@@ -34,6 +42,9 @@ export default function Dashboard() {
   const [tickers, setTickers] = useState<Ticker[]>([]);
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [ipos, setIpos] = useState<IPOEvent[]>([]);
+  const [loadingTickers, setLoadingTickers] = useState(true);
+  const [loadingNews, setLoadingNews] = useState(true);
+  const [loadingIPOs, setLoadingIPOs] = useState(true);
   const [rightTab, setRightTab] = useState(0);
   const [selectedTicker, setSelectedTicker] = useState<Ticker | null>(null);
   const [alertsSymbol, setAlertsSymbol] = useState<string | null>(null);
@@ -54,19 +65,27 @@ export default function Dashboard() {
       setTickers(await getTickers());
     } catch {
       // backend may not be running yet
+    } finally {
+      setLoadingTickers(false);
     }
   }, []);
 
   const loadNews = useCallback(async () => {
     try {
       setNews(await getNews());
-    } catch {}
+    } catch {
+    } finally {
+      setLoadingNews(false);
+    }
   }, []);
 
   const loadIPOs = useCallback(async () => {
     try {
       setIpos(await getIPOs());
-    } catch {}
+    } catch {
+    } finally {
+      setLoadingIPOs(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -151,6 +170,13 @@ export default function Dashboard() {
         </Box>
       )}
 
+      {/* WebSocket reconnection indicator */}
+      {!connected && (
+        <Box sx={{ display: "flex", justifyContent: "center", py: 0.5, bgcolor: "warning.light" }}>
+          <Chip label="Reconnecting to live feed…" color="warning" size="small" />
+        </Box>
+      )}
+
       <Container maxWidth="xl" sx={{ flex: 1, py: 2 }}>
         <Grid container spacing={2}>
           {/* Left column */}
@@ -160,7 +186,7 @@ export default function Dashboard() {
                 Breaking News
               </Typography>
               <Box sx={{ maxHeight: "60vh", overflow: "auto" }}>
-                <NewsFeed articles={news} />
+                {loadingNews ? <NewsFeedSkeleton /> : <NewsFeed articles={news} />}
               </Box>
             </Paper>
 
@@ -168,12 +194,16 @@ export default function Dashboard() {
               <Typography variant="h6" gutterBottom>
                 Watchlist
               </Typography>
-              <WatchList
-                tickers={tickers}
-                onRemove={handleRemoveTicker}
-                onSelectSymbol={setSelectedTicker}
-                onManageAlerts={(symbol) => setAlertsSymbol(symbol)}
-              />
+              {loadingTickers ? (
+                <WatchListSkeleton />
+              ) : (
+                <WatchList
+                  tickers={tickers}
+                  onRemove={handleRemoveTicker}
+                  onSelectSymbol={setSelectedTicker}
+                  onManageAlerts={(symbol) => setAlertsSymbol(symbol)}
+                />
+              )}
             </Paper>
           </Grid>
 
@@ -185,7 +215,8 @@ export default function Dashboard() {
                 <Tab label="Reminders" />
               </Tabs>
               <Box sx={{ p: 2, maxHeight: "40vh", overflow: "auto" }}>
-                {rightTab === 0 && <IPOCalendar ipos={ipos} />}
+                {rightTab === 0 &&
+                  (loadingIPOs ? <IPOCalendarSkeleton /> : <IPOCalendar ipos={ipos} />)}
                 {rightTab === 1 && (
                   <Typography color="text.secondary">
                     Your active reminders will appear here.

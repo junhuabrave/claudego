@@ -46,23 +46,26 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
   const [candles, setCandles] = useState<CandlePoint[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Reset to 1D and fetch when ticker changes
-  useEffect(() => {
-    if (!ticker) return;
-    setResolution("1D");
-  }, [ticker?.symbol]); // intentional: only reset on symbol change
+  // Stable dep key: avoids re-fetching on price-only WebSocket updates
+  const symbol = ticker?.symbol;
 
-  // Fetch candles whenever ticker or resolution changes
+  // Reset to 1D when the symbol changes
   useEffect(() => {
-    if (!ticker) return;
+    if (!symbol) return;
+    setResolution("1D");
+  }, [symbol]);
+
+  // Fetch candles whenever symbol or resolution changes
+  useEffect(() => {
+    if (!symbol) return;
     setLoading(true);
     setCandles([]);
     const { resolution: res, days } = RESOLUTION_PARAMS[resolution];
-    getCandles(ticker.symbol, res, days)
+    getCandles(symbol, res, days)
       .then(setCandles)
       .catch(() => setCandles([]))
       .finally(() => setLoading(false));
-  }, [ticker?.symbol, resolution]); // intentional: deps are the only values that should trigger a fetch
+  }, [symbol, resolution]);
 
   const isPositive = (ticker?.change_percent ?? 0) >= 0;
   const chartColor = isPositive ? "#2e7d32" : "#c62828";
