@@ -133,21 +133,22 @@ Wrap in `App.tsx`:
 
 ### Task 3: Code-Splitting with React.lazy (P1) — 2 days
 
-**Why:** Current bundle loads everything upfront. Dialog components (IPO reminder, price alert) are loaded even if user never opens them.
+**Why:** Current bundle loads everything upfront. Dialog components (stock chart, alerts, set-name) are loaded even if user never opens them.
 
 **Implementation:**
 
-1. Lazy-load dialog components:
+1. Lazy-load dialog components in `pages/Dashboard.tsx` (use **actual file names**):
    ```tsx
-   const IPOReminderDialog = React.lazy(() => import("./IPOReminderDialog"));
-   const PriceAlertDialog = React.lazy(() => import("./PriceAlertDialog"));
-   const ChatWidget = React.lazy(() => import("./ChatWidget"));
+   const StockChartDialog = React.lazy(() => import("../components/StockChartDialog"));
+   const AlertsDialog = React.lazy(() => import("../components/AlertsDialog"));
+   const ChatBox = React.lazy(() => import("../components/ChatBox"));
+   const SetNameDialog = React.lazy(() => import("../components/SetNameDialog"));
    ```
 
-2. Wrap with Suspense:
+2. Wrap with Suspense in `pages/Dashboard.tsx`:
    ```tsx
    <Suspense fallback={<CircularProgress size={24} />}>
-     {showAlert && <PriceAlertDialog />}
+     {showAlerts && <AlertsDialog ... />}
    </Suspense>
    ```
 
@@ -183,10 +184,10 @@ Use MUI's `<Skeleton>` component:
 ```
 
 Add skeletons for:
-- Ticker cards (in Dashboard)
-- News article list (in NewsFeed)
-- IPO events table (in IPOCalendar)
-- Chart area (in TickerDetail)
+- Ticker cards (in `WatchList.tsx`)
+- News article list (in `NewsFeed.tsx`)
+- IPO events table (in `IPOCalendar.tsx`)
+- Chart area (in `StockChartDialog.tsx`)
 
 **Acceptance Criteria:**
 - [ ] All data components show skeletons while loading
@@ -211,7 +212,7 @@ The `useWebSocket` hook already tracks `connected` state. Add a banner:
 )}
 ```
 
-Place in `Dashboard.tsx` above the ticker grid.
+Place in `pages/Dashboard.tsx` above the ticker grid. The hook returns `{ connected }` — already confirmed in `useWebSocket.ts`.
 
 **Acceptance Criteria:**
 - [ ] Banner shows within 2s of disconnect

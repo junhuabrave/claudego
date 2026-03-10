@@ -8,7 +8,7 @@
 
 ## Sprint Goal
 
-Close the **critical test coverage gaps**: backend has no tests for chat, scheduler, or providers; frontend has zero component tests. By end of sprint, we need 80% backend coverage and tests for all 7 major frontend components.
+Close the **critical test coverage gaps**: backend has no tests for chat, scheduler, or providers; frontend has zero component tests. By end of sprint, we need 80% backend coverage and tests for all 8 major frontend components.
 
 ---
 
@@ -36,20 +36,29 @@ Close the **critical test coverage gaps**: backend has no tests for chat, schedu
 
 ```python
 # Test parse_chat_message with various inputs
-async def test_chat_add_ticker():
-    """'add AAPL' should return action='added_ticker', ticker='AAPL'"""
+# NOTE: parse_chat_message() is a sync function, not async.
+# Action values from actual code: "add_ticker", "remove_ticker", "list_tickers", None
 
-async def test_chat_remove_ticker():
-    """'remove MSFT' should return action='removed_ticker', ticker='MSFT'"""
+def test_chat_add_ticker():
+    """'add AAPL' should return action='add_ticker', ticker='AAPL'"""
 
-async def test_chat_unknown_command():
+def test_chat_remove_ticker():
+    """'remove MSFT' should return action='remove_ticker', ticker='MSFT'"""
+
+def test_chat_list_tickers():
+    """'list' should return action='list_tickers', ticker=None"""
+
+def test_chat_help():
+    """'help' should return action=None with help text"""
+
+def test_chat_unknown_command():
     """Random text should return helpful reply, action=None"""
 
-async def test_chat_symbol_normalization():
+def test_chat_symbol_normalization():
     """'add aapl' should normalize to 'AAPL'"""
 
-async def test_chat_message_too_long():
-    """500+ char message handled gracefully"""
+def test_chat_alternative_verbs():
+    """'watch AAPL', 'track MSFT', 'unfollow TSLA' should all work"""
 ```
 
 **Key patterns from conftest.py:**
@@ -87,7 +96,7 @@ async def test_check_price_alerts_fires_on_threshold():
     """Alert with threshold_pct=5, direction='up', change=6% should fire"""
 
 async def test_check_price_alerts_respects_cooldown():
-    """Alert fired 2 min ago should not re-fire (cooldown default 30 min)"""
+    """Alert fired 2 min ago should not re-fire (cooldown is 60 min per settings.alert_cooldown_minutes)"""
 
 async def test_check_price_alerts_direction_down():
     """direction='down' only fires on negative change"""
@@ -141,7 +150,7 @@ async def test_provider_factory_returns_correct_type():
 
 ### Task 4: Frontend Component Tests (P0) — 5 days
 
-**All 7 major components need tests.** Use React Testing Library + Jest.
+**All 8 major components need tests.** Use React Testing Library + Jest.
 
 **Setup in `frontend/src/setupTests.ts`:**
 ```typescript
@@ -150,15 +159,16 @@ import "@testing-library/jest-dom";
 
 **Components to test:**
 
-| Component | Priority Test Cases | File |
-|-----------|-------------------|------|
-| Dashboard | Renders ticker grid, handles empty state | `Dashboard.test.tsx` |
-| NewsFeed | Renders article list, links open in new tab | `NewsFeed.test.tsx` |
-| IPOCalendar | Renders IPO table, date formatting | `IPOCalendar.test.tsx` |
-| TickerDetail | Renders chart placeholder, handles missing data | `TickerDetail.test.tsx` |
-| ChatWidget | Sends message, displays response | `ChatWidget.test.tsx` |
-| PriceAlertPanel | Lists alerts, toggle active/inactive | `PriceAlertPanel.test.tsx` |
-| Header/Nav | Login button, user menu, logout | `Header.test.tsx` |
+| Component | Actual File | Priority Test Cases | Test File |
+|-----------|-------------|-------------------|-----------|
+| Dashboard | `pages/Dashboard.tsx` | Renders layout, handles empty state | `Dashboard.test.tsx` |
+| NewsFeed | `components/NewsFeed.tsx` | Renders article list, links open in new tab | `NewsFeed.test.tsx` |
+| IPOCalendar | `components/IPOCalendar.tsx` | Renders IPO table, date formatting | `IPOCalendar.test.tsx` |
+| StockChartDialog | `components/StockChartDialog.tsx` | Renders chart, handles missing data | `StockChartDialog.test.tsx` |
+| ChatBox | `components/ChatBox.tsx` | Sends message, displays response | `ChatBox.test.tsx` |
+| AlertsDialog | `components/AlertsDialog.tsx` | Lists alerts, toggle active/inactive | `AlertsDialog.test.tsx` |
+| WatchList | `components/WatchList.tsx` | Renders tickers, add/remove actions | `WatchList.test.tsx` |
+| UserMenu | `components/UserMenu.tsx` | Login button, user menu, logout | `UserMenu.test.tsx` |
 
 **Pattern for all component tests:**
 
@@ -185,7 +195,7 @@ test("renders ticker symbols", async () => {
 ```
 
 **Acceptance Criteria:**
-- [ ] All 7 components have test files
+- [ ] All 8 components have test files
 - [ ] Each test file covers: render, user interaction, error state
 - [ ] `npm test` passes with all tests
 - [ ] Tests run in CI (already configured in ci.yml)

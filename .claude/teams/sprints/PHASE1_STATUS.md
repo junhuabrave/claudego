@@ -55,7 +55,7 @@ We are at the midpoint of Phase 1 (Foundation). Infrastructure fundamentals are 
 | 3 | **Rate limiting middleware** (100 req/min) | Auth/Security | 3 | Nothing |
 | 4 | **Refresh token flow** (15-min access + 30-day refresh) | Auth/Security | 3 | Nothing |
 | 5 | **Staging environment** | DevOps | 3 | Nothing |
-| 6 | **Frontend component tests** (7 components) | Test | 5 | Nothing |
+| 6 | **Frontend component tests** (8 components) | Test | 5 | Nothing |
 | 7 | **Backend tests** (chat, scheduler, providers) | Test | 3 | Nothing |
 
 ### P1 — Should complete in Phase 1
@@ -111,7 +111,7 @@ Test (E2E tests) ◄─────────────────┘ (need
 - [ ] DB connection pool tuned (pool_size >= 20)
 - [ ] CI pipeline blocks merge on failure
 - [ ] Backend test coverage > 80%
-- [ ] Frontend has component tests for all 7 major components
+- [ ] Frontend has component tests for all 8 major components
 - [ ] Staging environment mirrors production
 - [ ] At least 3 E2E flows pass in Playwright
 - [ ] Monitoring dashboard shows request rate + error rate

@@ -55,21 +55,26 @@ Eliminate the two biggest scaling bottlenecks: **every request hitting PostgreSQ
 
 4. Add cache layer in routes — **cache-aside pattern**:
    ```python
-   # In GET /tickers or GET /watchlist — cache the full response
-   cache_key = f"quotes:{user_id}"
-   cached = await redis.get(cache_key)
+   from app.core.cache import get_redis
+
+   # Use well-known keys (NOT per-user keys — quote data is the same for everyone)
+   r = await get_redis()
+   cached = await r.get("cache:tickers")
    if cached:
        return json.loads(cached)
    # ... fetch from DB ...
-   await redis.setex(cache_key, settings.cache_quotes_ttl, json.dumps(result))
+   await r.setex("cache:tickers", settings.cache_quotes_ttl, json.dumps(result))
    ```
+   Note: The tickers list is global (same for all users). Watchlist is per-user but changes infrequently — cache with key `watchlist:{user_id}` and invalidate on add/remove.
 
 5. Invalidate cache in scheduler after `poll_quotes()` broadcasts:
    ```python
-   # After updating DB, delete stale quote caches
-   keys = await redis.keys("quotes:*")
-   if keys:
-       await redis.delete(*keys)
+   # AVOID redis.keys("quotes:*") — it's O(N) and blocks Redis at scale.
+   # Instead, use a single well-known cache key per endpoint:
+   await redis.delete("cache:tickers", "cache:news")
+   # Or, since TTL is 30s and polls run every 30s, TTL expiry
+   # handles invalidation naturally. Only add explicit delete
+   # if you need instant freshness after a poll cycle.
    ```
 
 6. Hook into lifespan in `main.py`:
@@ -94,7 +99,7 @@ Eliminate the two biggest scaling bottlenecks: **every request hitting PostgreSQ
 
 ### Task 2: DB Connection Pool Tuning (P0) — 1 day
 
-**Why:** Default asyncpg pool is pool_size=5. At 10K DAU with bursty traffic, connections will queue and timeout.
+**Why:** Current `database.py` creates the engine with no pool config at all — just `create_async_engine(settings.database_url, echo=...)`. SQLAlchemy defaults to pool_size=5. At 10K DAU with bursty traffic, connections will queue and timeout.
 
 **Implementation in `app/core/database.py`:**
 

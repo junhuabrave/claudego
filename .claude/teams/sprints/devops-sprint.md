@@ -98,7 +98,7 @@ Redis is part of staging, but document the setup separately for production:
 
 **Local development:**
 ```yaml
-# Already in docker-compose.yml? If not, add:
+# NOT in docker-compose.yml currently — add this service:
 redis:
   image: redis:7-alpine
   ports:
@@ -106,18 +106,19 @@ redis:
   volumes:
     - redis_data:/data
 ```
+Also add `redis_data` to the existing `volumes:` section (currently only has `pgdata`).
 
 ---
 
 ### Task 3: Deploy Pipeline — Staging Auto, Prod Manual (P1) — 2 days
 
-**Why:** Current CI builds but doesn't deploy. We need automated staging deploys and gated production deploys.
+**Why:** Current CI builds and deploys directly to production (single `deploy` job with `environment: production`). We need a staging gate between CI and production to catch issues before they reach users.
 
 **Update `.github/workflows/ci.yml`:**
 
 ```yaml
 deploy-staging:
-  needs: [lint, test, build]
+  needs: [lint-backend, lint-frontend, test-backend, test-frontend, build]
   if: github.ref == 'refs/heads/main'
   runs-on: ubuntu-latest
   environment: staging
@@ -186,11 +187,15 @@ deploy-production:
 
 ---
 
-### Task 5: Add Redis + ESLint to CI Pipeline (P1) — 0.5 days
+### Task 5: Add Redis service + ESLint step to CI Pipeline (P1) — 0.5 days
 
-**Update `.github/workflows/ci.yml`:**
+**Current state:** CI already has `lint-frontend` job running `npx tsc --noEmit` (type checking only, no ESLint). Backend tests run without Redis.
 
+**Changes to `.github/workflows/ci.yml`:**
+
+1. Add Redis service container to `test-backend` job:
 ```yaml
+# In the test-backend job:
 services:
   redis:
     image: redis:7-alpine
@@ -200,24 +205,17 @@ services:
 
 env:
   REDIS_URL: redis://localhost:6379/0
+```
 
-# Add frontend lint step
-lint-frontend:
-  runs-on: ubuntu-latest
-  steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with:
-        node-version: 20
-        cache: npm
-        cache-dependency-path: frontend/package-lock.json
-    - run: cd frontend && npm ci
-    - run: cd frontend && npm run lint
+2. Add ESLint step to the existing `lint-frontend` job (after the `tsc --noEmit` step):
+```yaml
+# In the lint-frontend job, add after the tsc step:
+- run: cd frontend && npm run lint
 ```
 
 **Acceptance Criteria:**
 - [ ] Redis service available in CI for backend tests
-- [ ] Frontend ESLint runs in CI, blocks merge on failure
+- [ ] Frontend ESLint runs in CI alongside tsc, blocks merge on failure
 - [ ] CI time increase < 1 minute
 
 ---

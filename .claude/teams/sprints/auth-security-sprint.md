@@ -51,10 +51,13 @@ Close the two remaining P0 security gaps: **rate limiting** (we are currently op
 
 4. Apply per-route where needed:
    ```python
+   # IMPORTANT: slowapi requires `request: Request` as the FIRST parameter
+   # of the endpoint function. Current endpoints may not have it — add it.
+
    # Stricter limit on auth endpoint (prevent credential stuffing)
    @router.post("/auth/google")
    @limiter.limit("10/minute")
-   async def google_login(request: Request, ...):
+   async def google_login(request: Request, payload: GoogleLoginRequest, ...):
 
    # Stricter limit on chat (LLM cost)
    @router.post("/chat")
@@ -97,13 +100,15 @@ Close the two remaining P0 security gaps: **rate limiting** (we are currently op
 
 ### Task 2: Refresh Token Flow (P0) — 3 days
 
-**Why:** Current JWT tokens have no rotation. If stolen, they're valid until expiry. Refresh tokens allow short-lived access tokens with secure rotation.
+**Why:** Current JWT tokens use `jwt_expire_days = 30` — a single long-lived token with no rotation. If stolen, it's valid for a full month. Refresh tokens allow short-lived access tokens with secure rotation.
+
+**Current state (in `app/core/auth.py`):** `create_access_token()` uses `settings.jwt_expire_days` (30 days). `LoginResponse` already exists in `app/api/auth.py` — update it, don't create a new one.
 
 **Implementation:**
 
-1. Update `app/core/config.py`:
+1. Update `app/core/config.py` (rename existing field):
    ```python
-   access_token_expire_minutes: int = 15      # was: jwt_expiration_hours * 60
+   access_token_expire_minutes: int = 15      # was: jwt_expire_days = 30
    refresh_token_expire_days: int = 30
    ```
 
@@ -139,18 +144,22 @@ Close the two remaining P0 security gaps: **rate limiting** (we are currently op
    }
    ```
 
-5. Add refresh endpoint:
+5. Add refresh endpoint (use request body, not header — consistent with login):
    ```python
-   @router.post("/auth/refresh")
-   async def refresh(request: Request, db: AsyncSession = Depends(get_db)):
-       old_refresh = request.headers.get("X-Refresh-Token")
-       # Validate, rotate (revoke old, issue new), return new pair
+   class RefreshRequest(BaseModel):
+       refresh_token: str
+
+   @router.post("/auth/refresh", response_model=LoginResponse)
+   async def refresh(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
+       # Validate hash, check expiry, check revoked
+       # Rotate: revoke old, issue new pair
+       # Return same shape as login: { access_token, refresh_token, user }
    ```
 
-6. **Frontend update needed:** `AuthContext.tsx` must:
-   - Store refresh token in `localStorage` (separate key)
-   - Add axios interceptor: on 401, try refresh before redirecting to login
-   - Clear both tokens on logout
+6. **Frontend update needed:** `AuthContext.tsx` currently uses raw `fetch()` (not axios) for auth calls. Must:
+   - Store refresh token in `localStorage` (separate key: `finmonitor_refresh_token`)
+   - Add retry logic: on 401 from `/auth/me`, try POST `/auth/refresh` before clearing session
+   - Clear both tokens on logout (update the existing `logout` callback)
 
 **Security Considerations:**
 - Store refresh token hash in DB (bcrypt), never the raw token
@@ -200,10 +209,10 @@ Close the two remaining P0 security gaps: **rate limiting** (we are currently op
 ## Coordination
 
 - **With Backend:** Share Redis connection via `get_redis()` singleton. Rate limiting and cache use same Redis instance.
-- **With Frontend:** Refresh token flow requires AuthContext.tsx changes. Provide the API contract:
-  - `POST /auth/google` → `{ access_token, refresh_token, expires_in, user }`
-  - `POST /auth/refresh` with `X-Refresh-Token` header → same response
-  - Frontend should retry on 401 with refresh token before redirecting to login
+- **With Frontend:** Refresh token flow requires `AuthContext.tsx` changes. Note: AuthContext uses raw `fetch()`, not axios. Provide the API contract:
+  - `POST /auth/google` → `{ access_token, refresh_token, token_type, expires_in, user }`
+  - `POST /auth/refresh` with body `{ refresh_token }` → same response shape
+  - Frontend should retry on 401 with refresh token before clearing session
 - **With DevOps:** Need `REDIS_URL` in staging environment variables.
 
 ---
