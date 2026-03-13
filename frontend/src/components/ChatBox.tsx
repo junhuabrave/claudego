@@ -9,6 +9,7 @@ import {
   Typography,
 } from "@mui/material";
 import SendIcon from "@mui/icons-material/Send";
+import { useTranslation } from "react-i18next";
 import { sendChatMessage } from "../services/api";
 
 interface Message {
@@ -34,12 +35,10 @@ function extractTicker(text: string): string | null {
 }
 
 export default function ChatBox({ onTickerChanged }: Props) {
+  const { t } = useTranslation();
+
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 0,
-      text: "Hi! I can help manage your watchlist. Try 'add AAPL', 'remove TSLA', or 'list'. Type 'help' for all commands.",
-      from: "bot",
-    },
+    { id: 0, text: t("chat.welcome"), from: "bot" },
   ]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -76,14 +75,13 @@ export default function ChatBox({ onTickerChanged }: Props) {
       const resp = await sendChatMessage(text);
       const botMsg: Message = { id: nextId.current++, text: resp.reply, from: "bot" };
       setMessages((prev) => [...prev, botMsg]);
-
       if (resp.action === "add_ticker" || resp.action === "remove_ticker") {
         onTickerChanged();
       }
     } catch {
       const errMsg: Message = {
         id: nextId.current++,
-        text: "Sorry, something went wrong. Please try again.",
+        text: t("chat.error"),
         from: "bot",
       };
       setMessages((prev) => [...prev, errMsg]);
@@ -104,21 +102,14 @@ export default function ChatBox({ onTickerChanged }: Props) {
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <List
         ref={listRef}
-        sx={{
-          flex: 1,
-          overflow: "auto",
-          p: 1,
-          minHeight: 200,
-          maxHeight: 350,
-        }}
+        aria-label={t("chat.title")}
+        aria-live="polite"
+        sx={{ flex: 1, overflow: "auto", p: 1, minHeight: 200, maxHeight: 350 }}
       >
         {messages.map((msg) => (
           <ListItem
             key={msg.id}
-            sx={{
-              justifyContent: msg.from === "user" ? "flex-end" : "flex-start",
-              px: 0,
-            }}
+            sx={{ justifyContent: msg.from === "user" ? "flex-end" : "flex-start", px: 0 }}
           >
             <Paper
               elevation={0}
@@ -143,18 +134,20 @@ export default function ChatBox({ onTickerChanged }: Props) {
         <TextField
           fullWidth
           size="small"
-          placeholder="Type a command (e.g., add AAPL)..."
+          placeholder={t("chat.placeholder")}
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={sending}
           error={!!tickerError}
           helperText={tickerError}
+          inputProps={{ "aria-label": t("chat.placeholder") }}
         />
         <IconButton
           color="primary"
           onClick={handleSend}
           disabled={!input.trim() || sending || !!tickerError}
+          aria-label={t("chat.sendAriaLabel")}
         >
           <SendIcon />
         </IconButton>

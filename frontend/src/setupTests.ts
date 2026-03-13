@@ -1,4 +1,5 @@
 import "@testing-library/jest-dom";
+import "./i18n"; // initialise translations so t() returns real strings in tests
 
 // Polyfill crypto.randomUUID for Jest / JSDOM environments
 // (Node < 19 and JSDOM do not expose it as a global)

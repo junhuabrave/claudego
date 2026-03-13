@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
 import {
   Alert,
   AppBar,
@@ -6,15 +6,24 @@ import {
   Chip,
   Container,
   Grid,
+  IconButton,
+  MenuItem,
   Paper,
+  Select,
   Snackbar,
   Tab,
   Tabs,
   Toolbar,
+  Tooltip,
   Typography,
+  useTheme,
 } from "@mui/material";
 import ShowChartIcon from "@mui/icons-material/ShowChart";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import Brightness4Icon from "@mui/icons-material/Brightness4";
+import Brightness7Icon from "@mui/icons-material/Brightness7";
+import { Trans, useTranslation } from "react-i18next";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import AlertsDialog from "../components/AlertsDialog";
 import ChatBox from "../components/ChatBox";
 import IPOCalendar from "../components/IPOCalendar";
@@ -31,20 +40,26 @@ import {
   NewsFeedSkeleton,
   WatchListSkeleton,
 } from "../components/common/LoadingSkeleton";
+import { ColorModeContext } from "../contexts/ColorModeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { getIPOs, getNews, getTickers, removeTicker } from "../services/api";
-import type { AlertTriggered, IPOEvent, NewsArticle, Ticker, WSMessage } from "../types";
+import type { AlertTriggered, NewsArticle, Ticker, WSMessage } from "../types";
+
+const SUPPORTED_LANGUAGES = [
+  { code: "en", label: "EN" },
+  { code: "ko", label: "한국어" },
+  { code: "ja", label: "日本語" },
+  { code: "zh", label: "中文" },
+] as const;
 
 export default function Dashboard() {
+  const { t, i18n } = useTranslation();
+  const theme = useTheme();
+  const { toggleColorMode } = useContext(ColorModeContext);
+  const queryClient = useQueryClient();
   const { user, isAuthenticated } = useAuth();
 
-  const [tickers, setTickers] = useState<Ticker[]>([]);
-  const [news, setNews] = useState<NewsArticle[]>([]);
-  const [ipos, setIpos] = useState<IPOEvent[]>([]);
-  const [loadingTickers, setLoadingTickers] = useState(true);
-  const [loadingNews, setLoadingNews] = useState(true);
-  const [loadingIPOs, setLoadingIPOs] = useState(true);
   const [rightTab, setRightTab] = useState(0);
   const [selectedTicker, setSelectedTicker] = useState<Ticker | null>(null);
   const [alertsSymbol, setAlertsSymbol] = useState<string | null>(null);
@@ -60,56 +75,58 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, user]);
 
-  const loadTickers = useCallback(async () => {
-    try {
-      setTickers(await getTickers());
-    } catch {
-      // backend may not be running yet
-    } finally {
-      setLoadingTickers(false);
-    }
-  }, []);
+  // ── React Query ──────────────────────────────────────────────────────────
+  const { data: tickers = [], isLoading: loadingTickers } = useQuery({
+    queryKey: ["tickers", user?.id],
+    queryFn: getTickers,
+  });
 
-  const loadNews = useCallback(async () => {
-    try {
-      setNews(await getNews());
-    } catch {
-    } finally {
-      setLoadingNews(false);
-    }
-  }, []);
+  const { data: news = [], isLoading: loadingNews } = useQuery({
+    queryKey: ["news"],
+    queryFn: () => getNews(),
+    staleTime: 60_000,
+  });
 
-  const loadIPOs = useCallback(async () => {
-    try {
-      setIpos(await getIPOs());
-    } catch {
-    } finally {
-      setLoadingIPOs(false);
-    }
-  }, []);
+  const { data: ipos = [], isLoading: loadingIPOs } = useQuery({
+    queryKey: ["ipos"],
+    queryFn: getIPOs,
+    staleTime: 300_000, // IPOs update infrequently
+  });
 
-  useEffect(() => {
-    loadTickers();
-    loadNews();
-    loadIPOs();
-  }, [loadTickers, loadNews, loadIPOs]);
+  // Optimistic ticker removal: removes from UI instantly, rolls back on error.
+  const removeMutation = useMutation({
+    mutationFn: removeTicker,
+    onMutate: async (symbol) => {
+      await queryClient.cancelQueries({ queryKey: ["tickers", user?.id] });
+      const previous = queryClient.getQueryData<Ticker[]>(["tickers", user?.id]);
+      queryClient.setQueryData<Ticker[]>(["tickers", user?.id], (old = []) =>
+        old.filter((tk) => tk.symbol !== symbol)
+      );
+      return { previous };
+    },
+    onError: (_err, _symbol, ctx) => {
+      queryClient.setQueryData(["tickers", user?.id], ctx?.previous);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] });
+    },
+  });
 
-  // Reload tickers when user changes (login / logout)
-  useEffect(() => {
-    loadTickers();
-  }, [user?.id, loadTickers]);
-
+  // ── WebSocket ─────────────────────────────────────────────────────────────
   const handleWSMessage = useCallback(
     (msg: WSMessage) => {
       switch (msg.type) {
         case "news":
-          setNews((prev) => [msg.data as unknown as NewsArticle, ...prev].slice(0, 100));
+          queryClient.setQueryData<NewsArticle[]>(["news"], (old) => {
+            const existing = old ?? [];
+            return [msg.data as unknown as NewsArticle, ...existing].slice(0, 100);
+          });
           break;
         case "quotes":
-          loadTickers();
+          queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] });
           break;
         case "ipo_update":
-          loadIPOs();
+          queryClient.invalidateQueries({ queryKey: ["ipos"] });
           break;
         case "alert": {
           const payload = msg.data as unknown as AlertTriggered;
@@ -119,33 +136,82 @@ export default function Dashboard() {
         }
       }
     },
-    [loadTickers, loadIPOs, user?.id]
+    [queryClient, user?.id]
   );
 
   const { connected } = useWebSocket(handleWSMessage);
 
-  const handleRemoveTicker = async (symbol: string) => {
-    try {
-      await removeTicker(symbol);
-      await loadTickers();
-    } catch {}
-  };
-
   const dismissAlert = (alertId: number) =>
     setActiveAlerts((prev) => prev.filter((a) => a.alert_id !== alertId));
 
+  const handleLanguageChange = (lang: string) => {
+    i18n.changeLanguage(lang);
+    try {
+      localStorage.setItem("language", lang);
+    } catch {
+      // storage unavailable
+    }
+  };
+
   return (
-    <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100vh", bgcolor: "grey.50" }}>
+    <Box sx={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
       <AppBar position="static" elevation={1}>
         <Toolbar>
           <ShowChartIcon sx={{ mr: 1 }} />
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Financial Markets Monitor
+          <Typography
+            variant="h6"
+            sx={{ flexGrow: 1, display: { xs: "none", sm: "block" } }}
+          >
+            {t("app.title")}
           </Typography>
-          <StatusBar wsConnected={connected} tickerCount={tickers.length} newsCount={news.length} />
-          <Box sx={{ ml: 2 }}>
-            <UserMenu />
+
+          {/* StatusBar hidden on very small screens to prevent overflow */}
+          <Box sx={{ display: { xs: "none", md: "flex" }, mr: 1 }}>
+            <StatusBar
+              wsConnected={connected}
+              tickerCount={tickers.length}
+              newsCount={news.length}
+            />
           </Box>
+
+          {/* Language selector */}
+          <Select
+            value={i18n.language.split("-")[0]}
+            onChange={(e) => handleLanguageChange(e.target.value as string)}
+            size="small"
+            variant="standard"
+            inputProps={{ "aria-label": t("nav.language") }}
+            sx={{
+              color: "inherit",
+              mr: 1,
+              minWidth: 56,
+              ".MuiSelect-icon": { color: "inherit" },
+              "&:before": { borderColor: "rgba(255,255,255,0.4)" },
+            }}
+          >
+            {SUPPORTED_LANGUAGES.map((l) => (
+              <MenuItem key={l.code} value={l.code}>
+                {l.label}
+              </MenuItem>
+            ))}
+          </Select>
+
+          {/* Dark mode toggle */}
+          <Tooltip
+            title={
+              theme.palette.mode === "dark" ? t("nav.darkModeOff") : t("nav.darkModeOn")
+            }
+          >
+            <IconButton color="inherit" onClick={toggleColorMode} size="small" sx={{ mr: 1 }}>
+              {theme.palette.mode === "dark" ? (
+                <Brightness7Icon fontSize="small" />
+              ) : (
+                <Brightness4Icon fontSize="small" />
+              )}
+            </IconButton>
+          </Tooltip>
+
+          <UserMenu />
         </Toolbar>
       </AppBar>
 
@@ -164,8 +230,7 @@ export default function Dashboard() {
         >
           <InfoOutlinedIcon fontSize="small" />
           <Typography variant="body2" sx={{ flexGrow: 1 }}>
-            Your watchlist is session-only.{" "}
-            <strong>Sign in with Google</strong> in the toolbar to save it permanently.
+            <Trans i18nKey="banner.anonymous" />
           </Typography>
         </Box>
       )}
@@ -173,7 +238,7 @@ export default function Dashboard() {
       {/* WebSocket reconnection indicator */}
       {!connected && (
         <Box sx={{ display: "flex", justifyContent: "center", py: 0.5, bgcolor: "warning.light" }}>
-          <Chip label="Reconnecting to live feed…" color="warning" size="small" />
+          <Chip label={t("banner.reconnecting")} color="warning" size="small" />
         </Box>
       )}
 
@@ -183,23 +248,27 @@ export default function Dashboard() {
           <Grid item xs={12} md={7} lg={8}>
             <Paper sx={{ p: 2, mb: 2 }}>
               <Typography variant="h6" gutterBottom>
-                Breaking News
+                {t("news.title")}
               </Typography>
-              <Box sx={{ maxHeight: "60vh", overflow: "auto" }}>
-                {loadingNews ? <NewsFeedSkeleton /> : <NewsFeed articles={news} />}
+              <Box sx={{ maxHeight: "60vh", overflow: "hidden" }}>
+                {loadingNews ? (
+                  <NewsFeedSkeleton />
+                ) : (
+                  <NewsFeed articles={news} listHeight={500} />
+                )}
               </Box>
             </Paper>
 
             <Paper sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>
-                Watchlist
+                {t("watchlist.title")}
               </Typography>
               {loadingTickers ? (
                 <WatchListSkeleton />
               ) : (
                 <WatchList
                   tickers={tickers}
-                  onRemove={handleRemoveTicker}
+                  onRemove={(symbol) => removeMutation.mutate(symbol)}
                   onSelectSymbol={setSelectedTicker}
                   onManageAlerts={(symbol) => setAlertsSymbol(symbol)}
                 />
@@ -211,25 +280,27 @@ export default function Dashboard() {
           <Grid item xs={12} md={5} lg={4}>
             <Paper sx={{ mb: 2 }}>
               <Tabs value={rightTab} onChange={(_, v) => setRightTab(v)} variant="fullWidth">
-                <Tab label="IPO Calendar" />
-                <Tab label="Reminders" />
+                <Tab label={t("ipo.title")} />
+                <Tab label={t("reminders.title")} />
               </Tabs>
               <Box sx={{ p: 2, maxHeight: "40vh", overflow: "auto" }}>
                 {rightTab === 0 &&
                   (loadingIPOs ? <IPOCalendarSkeleton /> : <IPOCalendar ipos={ipos} />)}
                 {rightTab === 1 && (
-                  <Typography color="text.secondary">
-                    Your active reminders will appear here.
-                  </Typography>
+                  <Typography color="text.secondary">{t("reminders.empty")}</Typography>
                 )}
               </Box>
             </Paper>
 
             <Paper sx={{ p: 0 }}>
               <Box sx={{ p: 2, pb: 0 }}>
-                <Typography variant="h6">Chat</Typography>
+                <Typography variant="h6">{t("chat.title")}</Typography>
               </Box>
-              <ChatBox onTickerChanged={loadTickers} />
+              <ChatBox
+                onTickerChanged={() =>
+                  queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] })
+                }
+              />
             </Paper>
           </Grid>
         </Grid>
