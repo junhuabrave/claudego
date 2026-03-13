@@ -30,6 +30,7 @@ import { useTranslation } from "react-i18next";
 import { getCandles } from "../services/api";
 import type { CandlePoint, Ticker } from "../types";
 import type { EnhancedCandlePoint } from "../workers/priceStats.worker";
+import { createPriceStatsWorker } from "../workers/createPriceStatsWorker";
 
 interface Props {
   ticker: Ticker | null;
@@ -60,9 +61,7 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
   const workerRef = useRef<Worker | null>(null);
 
   useEffect(() => {
-    workerRef.current = new Worker(
-      new URL("../workers/priceStats.worker.ts", import.meta.url)
-    );
+    workerRef.current = createPriceStatsWorker();
     workerRef.current.onmessage = (e: MessageEvent<EnhancedCandlePoint[]>) => {
       setEnhanced(e.data);
     };

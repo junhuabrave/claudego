@@ -47,7 +47,10 @@
   "jest": {
     "transformIgnorePatterns": [
       "node_modules/(?!(axios)/)"
-    ]
+    ],
+    "moduleNameMapper": {
+      "^.*/workers/createPriceStatsWorker$": "<rootDir>/src/__mocks__/createPriceStatsWorker.ts"
+    }
   },
   "browserslist": {
     "production": [
