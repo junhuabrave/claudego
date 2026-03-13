@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Box,
   CircularProgress,
@@ -9,6 +9,8 @@ import {
   ToggleButton,
   ToggleButtonGroup,
   Typography,
+  useMediaQuery,
+  useTheme,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
@@ -17,14 +19,17 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  Line,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
 import dayjs from "dayjs";
+import { useTranslation } from "react-i18next";
 import { getCandles } from "../services/api";
 import type { CandlePoint, Ticker } from "../types";
+import type { EnhancedCandlePoint } from "../workers/priceStats.worker";
 
 interface Props {
   ticker: Ticker | null;
@@ -42,27 +47,52 @@ const RESOLUTION_PARAMS: Record<Resolution, { resolution: string; days: number }
 const STAT_LABELS = ["Open", "High", "Low", "Close"] as const;
 
 export default function StockChartDialog({ ticker, onClose }: Props) {
+  const { t } = useTranslation();
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
+
   const [resolution, setResolution] = useState<Resolution>("1D");
   const [candles, setCandles] = useState<CandlePoint[]>([]);
+  const [enhanced, setEnhanced] = useState<EnhancedCandlePoint[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Stable dep key: avoids re-fetching on price-only WebSocket updates
+  // Web Worker for SMA computation (Phase 3 — offloads moving-average maths from main thread).
+  const workerRef = useRef<Worker | null>(null);
+
+  useEffect(() => {
+    workerRef.current = new Worker(
+      new URL("../workers/priceStats.worker.ts", import.meta.url)
+    );
+    workerRef.current.onmessage = (e: MessageEvent<EnhancedCandlePoint[]>) => {
+      setEnhanced(e.data);
+    };
+    return () => {
+      workerRef.current?.terminate();
+    };
+  }, []);
+
+  // Stable dep key: avoids re-fetching on price-only WebSocket updates.
   const symbol = ticker?.symbol;
 
-  // Reset to 1D when the symbol changes
+  // Reset to 1D when the symbol changes.
   useEffect(() => {
     if (!symbol) return;
     setResolution("1D");
   }, [symbol]);
 
-  // Fetch candles whenever symbol or resolution changes
+  // Fetch candles whenever symbol or resolution changes.
   useEffect(() => {
     if (!symbol) return;
     setLoading(true);
     setCandles([]);
+    setEnhanced([]);
     const { resolution: res, days } = RESOLUTION_PARAMS[resolution];
     getCandles(symbol, res, days)
-      .then(setCandles)
+      .then((data) => {
+        setCandles(data);
+        // Dispatch to worker for SMA computation.
+        workerRef.current?.postMessage({ candles: data });
+      })
       .catch(() => setCandles([]))
       .finally(() => setLoading(false));
   }, [symbol, resolution]);
@@ -76,7 +106,7 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
   const high = candles.length ? Math.max(...candles.map((c) => c.h)) : null;
   const low = candles.length ? Math.min(...candles.map((c) => c.l)) : null;
 
-  const statValues: Record<typeof STAT_LABELS[number], number | null> = {
+  const statValues: Record<(typeof STAT_LABELS)[number], number | null> = {
     Open: first?.o ?? null,
     High: high,
     Low: low,
@@ -93,26 +123,28 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
       ? dayjs(ts * 1000).format("HH:mm")
       : dayjs(ts * 1000).format("MMM D, YYYY");
 
+  // Use enhanced data (with SMAs) when available, fall back to raw candles.
+  const chartData = enhanced.length > 0 ? enhanced : candles;
+
   return (
-    <Dialog open={!!ticker} onClose={onClose} fullWidth maxWidth="md">
+    <Dialog
+      open={!!ticker}
+      onClose={onClose}
+      fullWidth
+      maxWidth="md"
+      fullScreen={fullScreen}
+    >
       <DialogTitle sx={{ pb: 1 }}>
         <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
-          {/* Left: symbol + name */}
           <Box>
             <Typography variant="h6" fontWeight={700} component="span">
               {ticker?.symbol}
             </Typography>
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              component="span"
-              sx={{ ml: 1 }}
-            >
+            <Typography variant="body2" color="text.secondary" component="span" sx={{ ml: 1 }}>
               {ticker?.name}
             </Typography>
           </Box>
 
-          {/* Right: price + close button */}
           <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
             {ticker?.last_price != null && (
               <Box sx={{ textAlign: "right" }}>
@@ -120,12 +152,7 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
                   ${ticker.last_price.toFixed(2)}
                 </Typography>
                 <Box
-                  sx={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "flex-end",
-                    gap: 0.25,
-                  }}
+                  sx={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 0.25 }}
                 >
                   {isPositive ? (
                     <TrendingUpIcon sx={{ fontSize: 16 }} color="success" />
@@ -143,7 +170,12 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
                 </Box>
               </Box>
             )}
-            <IconButton onClick={onClose} size="small" sx={{ mt: -0.5 }}>
+            <IconButton
+              onClick={onClose}
+              size="small"
+              sx={{ mt: -0.5 }}
+              aria-label={t("chart.close")}
+            >
               <CloseIcon fontSize="small" />
             </IconButton>
           </Box>
@@ -159,7 +191,7 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
               gap: 3,
               mb: 2,
               p: 1.5,
-              bgcolor: "grey.50",
+              bgcolor: "action.hover",
               borderRadius: 1,
               flexWrap: "wrap",
             }}
@@ -188,6 +220,19 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
                 </Typography>
               </Box>
             )}
+            {/* SMA legend */}
+            {enhanced.length > 0 && (
+              <Box sx={{ ml: "auto", display: "flex", gap: 2, alignItems: "center" }}>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Box sx={{ width: 20, height: 2, bgcolor: "#ff9800" }} />
+                  <Typography variant="caption">SMA5</Typography>
+                </Box>
+                <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
+                  <Box sx={{ width: 20, height: 2, bgcolor: "#9c27b0" }} />
+                  <Typography variant="caption">SMA20</Typography>
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
 
@@ -206,24 +251,18 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
         </Box>
 
         {/* Chart */}
-        <Box sx={{ height: 320 }}>
+        <Box sx={{ height: fullScreen ? "50vh" : 320 }}>
           {loading ? (
-            <Box
-              sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}
-            >
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>
               <CircularProgress size={36} />
             </Box>
           ) : candles.length === 0 ? (
-            <Box
-              sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}
-            >
-              <Typography color="text.secondary">
-                No chart data available for this period.
-              </Typography>
+            <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }}>
+              <Typography color="text.secondary">{t("chart.noData")}</Typography>
             </Box>
           ) : (
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={candles} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor={chartColor} stopOpacity={0.25} />
@@ -250,11 +289,7 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
                 <Tooltip
                   formatter={(value: number) => [`$${value.toFixed(2)}`, "Price"]}
                   labelFormatter={formatTooltipLabel}
-                  contentStyle={{
-                    borderRadius: 8,
-                    border: "1px solid #e0e0e0",
-                    fontSize: 13,
-                  }}
+                  contentStyle={{ borderRadius: 8, border: "1px solid #e0e0e0", fontSize: 13 }}
                 />
                 <Area
                   type="monotone"
@@ -265,6 +300,28 @@ export default function StockChartDialog({ ticker, onClose }: Props) {
                   dot={false}
                   activeDot={{ r: 4, strokeWidth: 0, fill: chartColor }}
                 />
+                {enhanced.length > 0 && (
+                  <>
+                    <Line
+                      type="monotone"
+                      dataKey="sma5"
+                      stroke="#ff9800"
+                      strokeWidth={1.5}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={false}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="sma20"
+                      stroke="#9c27b0"
+                      strokeWidth={1.5}
+                      dot={false}
+                      activeDot={false}
+                      isAnimationActive={false}
+                    />
+                  </>
+                )}
               </AreaChart>
             </ResponsiveContainer>
           )}

@@ -1,0 +1,47 @@
+{
+  "app": { "title": "Financial Markets Monitor" },
+  "nav": {
+    "darkModeOn": "Switch to dark mode",
+    "darkModeOff": "Switch to light mode",
+    "language": "Language"
+  },
+  "banner": {
+    "anonymous": "Your watchlist is session-only. <strong>Sign in with Google</strong> in the toolbar to save it permanently.",
+    "reconnecting": "Reconnecting to live feed\u2026"
+  },
+  "news": {
+    "title": "Breaking News",
+    "empty": "No news articles yet. Data will appear once the backend starts polling.",
+    "ariaLabel": "News articles"
+  },
+  "watchlist": {
+    "title": "Watchlist",
+    "empty": "Your watchlist is empty. Use the chat to add tickers (e.g., \u201cadd AAPL\u201d).",
+    "ariaLabel": "Watchlist table",
+    "symbol": "Symbol",
+    "name": "Name",
+    "price": "Price",
+    "change": "Change",
+    "actions": "Actions",
+    "removeAriaLabel": "Remove {{symbol}}",
+    "alertsAriaLabel": "Manage alerts for {{symbol}}",
+    "chartAriaLabel": "View chart for {{symbol}}"
+  },
+  "ipo": { "title": "IPO Calendar" },
+  "reminders": {
+    "title": "Reminders",
+    "empty": "Your active reminders will appear here."
+  },
+  "chat": {
+    "title": "Chat",
+    "welcome": "Hi! I can help manage your watchlist. Try \u2018add AAPL\u2019, \u2018remove TSLA\u2019, or \u2018list\u2019. Type \u2018help\u2019 for all commands.",
+    "placeholder": "Type a command (e.g., add AAPL)\u2026",
+    "sendAriaLabel": "Send message",
+    "error": "Sorry, something went wrong. Please try again."
+  },
+  "error": { "title": "Something went wrong.", "retry": "Try again" },
+  "chart": {
+    "noData": "No chart data available for this period.",
+    "close": "Close dialog"
+  }
+}
