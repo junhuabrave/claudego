@@ -10,11 +10,13 @@
 
 Ship **developer tooling** (ESLint + Prettier) and **user-facing resilience** (ErrorBoundary, loading states). The frontend has zero component tests — the test engineering team owns that, but we need to make components testable.
 
+> **Sprint outcome (updated 2026-03-11):** Tasks 1, 2, 4, 5 shipped. Task 3 (code-splitting) blocked by CRA — see note below. See PR #18 for all changes.
+
 ---
 
 ## Tasks
 
-### Task 1: ESLint + Prettier Configuration (P0) — 1 day
+### Task 1: ESLint + Prettier Configuration (P0) — 1 day ✅ DONE
 
 **Why:** No linting config exists. Code style is inconsistent across components. This is a prerequisite for productive multi-developer work.
 
@@ -29,19 +31,21 @@ Ship **developer tooling** (ESLint + Prettier) and **user-facing resilience** (E
 2. Create `.eslintrc.json`:
    ```json
    {
-     "extends": [
-       "react-app",
-       "plugin:@typescript-eslint/recommended",
-       "plugin:react-hooks/recommended",
-       "prettier"
-     ],
+     "extends": ["react-app", "react-app/jest"],
      "rules": {
+       "@typescript-eslint/no-explicit-any": "error",
        "@typescript-eslint/no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-       "react-hooks/exhaustive-deps": "warn",
        "no-console": ["warn", { "allow": ["warn", "error"] }]
      }
    }
    ```
+
+   > ⚠️ **CRA gotcha:** Do NOT extend `plugin:@typescript-eslint/recommended` directly.
+   > `eslint-config-react-app` already bundles its own copy of `@typescript-eslint/eslint-plugin`.
+   > Adding a second explicit extend causes "ESLint couldn't determine the plugin @typescript-eslint
+   > uniquely" — a duplicate instance conflict. Extend `react-app` only and add rules directly.
+   > Also do NOT use `eslint-disable-line react-hooks/exhaustive-deps` inline comments — CRA's
+   > bundled ESLint can't resolve plugin-prefixed rules in disable comments. Fix the deps instead.
 
 3. Create `.prettierrc`:
    ```json
@@ -56,10 +60,12 @@ Ship **developer tooling** (ESLint + Prettier) and **user-facing resilience** (E
 
 4. Add scripts to `package.json`:
    ```json
-   "lint": "eslint src/ --ext .ts,.tsx",
-   "lint:fix": "eslint src/ --ext .ts,.tsx --fix",
-   "format": "prettier --write src/"
+   "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
+   "format": "prettier --write src"
    ```
+
+   > `--max-warnings 0` ensures CI fails on warnings, not just errors. This caught 18 issues
+   > on first run — mostly `any` types, unused imports, and testing-library anti-patterns.
 
 5. Run `npm run lint:fix && npm run format` to normalize existing code. Commit as a **standalone commit** (no other changes mixed in).
 
@@ -70,7 +76,7 @@ Ship **developer tooling** (ESLint + Prettier) and **user-facing resilience** (E
 
 ---
 
-### Task 2: ErrorBoundary Component (P1) — 1 day
+### Task 2: ErrorBoundary Component (P1) — 1 day ✅ DONE
 
 **Why:** A single component crash takes down the entire app. Users see a white screen with no recovery option.
 
@@ -131,11 +137,26 @@ Wrap in `App.tsx`:
 
 ---
 
-### Task 3: Code-Splitting with React.lazy (P1) — 2 days
+### Task 3: Code-Splitting with React.lazy (P1) — 2 days ⛔ BLOCKED (CRA)
 
 **Why:** Current bundle loads everything upfront. Dialog components (stock chart, alerts, set-name) are loaded even if user never opens them.
 
-**Implementation:**
+> ⛔ **Blocked on CRA — do not attempt until Vite migration (Phase 2).**
+>
+> CRA's React Fast Refresh calls `flushSync` on every HMR update. React 18 throws
+> "A component suspended while responding to synchronous input" whenever a `<Suspense>`
+> boundary exists in the tree — even if the suspended component isn't the one being updated.
+> Neither `startTransition` nor eager chunk preloading resolves this. `FAST_REFRESH=false`
+> would unblock it but permanently degrades dev DX (no state-preserving hot reload) for the
+> entire team — not worth it for dialog-level splits whose bundle savings are modest.
+>
+> A comment has been added to `Dashboard.tsx` explaining the deferral. Once we migrate to
+> Vite (no `flushSync` on HMR), this task can be completed as written.
+>
+> **Workaround for now:** Skeletons + loading states cover perceived performance. Real bundle
+> wins (Recharts, MUI) require tree-shaking analysis, not dialog splitting.
+
+**Implementation (for reference — execute after Vite migration):**
 
 1. Lazy-load dialog components in `pages/Dashboard.tsx` (use **actual file names**):
    ```tsx
@@ -164,7 +185,7 @@ Wrap in `App.tsx`:
 
 ---
 
-### Task 4: Loading Skeletons (P1) — 2 days
+### Task 4: Loading Skeletons (P1) — 2 days ✅ DONE
 
 **Why:** Dashboard shows empty space while data loads. Users perceive this as broken.
 
@@ -196,7 +217,7 @@ Add skeletons for:
 
 ---
 
-### Task 5: WebSocket Reconnection Indicator (P1) — 1 day
+### Task 5: WebSocket Reconnection Indicator (P1) — 1 day ✅ DONE
 
 **Why:** When WebSocket disconnects, users don't know real-time data is stale.
 
@@ -231,11 +252,14 @@ Place in `pages/Dashboard.tsx` above the ticker grid. The hook returns `{ connec
 
 ## Out of Scope This Sprint
 
-- Vite migration (Phase 2)
+- **Vite migration** — originally Phase 2, but Task 3 above is permanently blocked until this lands.
+  The CRA blocker makes Vite a higher-priority Phase 2 item than originally planned. Recommend
+  scheduling it at the start of Phase 2 before other Phase 2 work, not at the end.
 - i18n (Phase 2)
 - Dark mode (Phase 2)
-- Virtual scrolling (Phase 2)
+- Virtual scrolling / `react-window` (Phase 2)
 - Service worker / PWA (Phase 2)
+- React Query / SWR for server state (Phase 2 — currently using manual loading booleans per section)
 
 ---
 

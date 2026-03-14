@@ -32,6 +32,25 @@ Active sprint briefs and status reports are in the `sprints/` directory:
 
 **Total: 10–14 engineers** for Phase 1 (100K DAU target)
 
+### Hiring Roadmap — Expertise Gaps
+
+Phase 1 execution exposed capability gaps that current teams cannot absorb. See
+[PHASE1_STATUS.md](sprints/PHASE1_STATUS.md#hiring--expertise-gaps) for full rationale.
+
+| Priority | Role | When | Format | Rationale |
+|----------|------|------|--------|-----------|
+| 🔴 Critical | **SRE / Platform Engineer** | Before Phase 2 | Full-time | DevOps builds infra; nobody operates production. No on-call, no incident response, no capacity planning. |
+| 🔴 Critical | **DBA / Data Engineer** | Phase 2 start | Contract (2–3 days/month) | Read replicas, query optimization, partitioning, backup/recovery — none scoped to any current team. |
+| 🟡 Recommended | **Security Engineer** | Phase 2 | Full-time or contract | No pen testing, no WAF, no secrets rotation, no compliance tracking. |
+| 🟡 Recommended | **UX/Product Designer** | Phase 2 | Full-time or fractional | Phase 2 features (i18n, dark mode, PWA) need design input; no accessibility audit planned. |
+| 🟢 Phase 3 | **Mobile Engineer** | If mobile planned | Full-time | Refresh token flow already flags mobile risk; nobody owns native builds. |
+| 🟢 Phase 3 | **Data/Analytics Engineer** | 100K+ DAU | Full-time | No analytics pipeline, no BI tooling, time-series data in PostgreSQL. |
+
+**Updated headcount projection:**
+- Phase 1: 10–14 engineers (current)
+- Phase 2: 13–18 engineers (+1 SRE, +1 Security or contract, +1 Designer, +DBA contract)
+- Phase 3: 17–24 engineers (+Mobile, +Data, additional Backend/Frontend)
+
 ---
 
 ## Architecture (Current → Target)
