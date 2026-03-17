@@ -9,6 +9,13 @@ _DEFAULT_JWT_SECRET = "change-me-in-production"
 class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/finmonitor"
+    db_pool_size: int = 20
+    db_max_overflow: int = 10
+    db_pool_recycle: int = 1800  # seconds — recycle connections after 30 min
+    db_pool_pre_ping: bool = True  # validate connection before use (handles stale connections)
+
+    # Cache
+    redis_url: str | None = None  # optional — app starts without Redis (cache disabled)
 
     # Data provider API keys
     finnhub_api_key: str = ""

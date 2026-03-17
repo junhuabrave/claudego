@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from app.api.auth import router as auth_router
 from app.api.routes import router
+from app.core.cache import close_redis, init_redis
 from app.core.config import settings
 from app.core.database import engine
 from app.services.scheduler import poll_ipos, start_scheduler, stop_scheduler
@@ -24,11 +25,13 @@ async def lifespan(app: FastAPI):
     # Run `alembic upgrade head` before starting the application in any environment.
     # Never use Base.metadata.create_all() in production — it cannot roll back
     # and silently skips columns that already exist.
+    await init_redis()
     start_scheduler()
     await poll_ipos()  # seed DB immediately; scheduler runs hourly after this
     yield
     # Shutdown
     stop_scheduler()
+    await close_redis()
     await engine.dispose()
 
 

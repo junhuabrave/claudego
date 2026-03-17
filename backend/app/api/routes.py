@@ -1,13 +1,16 @@
 """API routes for the financial monitoring system."""
 
 import datetime
+import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy import delete, select
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_current_user, require_google_user
+from app.core.cache import NEWS_TTL, WATCHLIST_TTL, get_redis, invalidate_watchlist
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.models import (
@@ -48,14 +51,29 @@ router = APIRouter()
 async def list_tickers(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis | None = Depends(get_redis),
 ):
+    cache_key = f"watchlist:{current_user.id}"
+    if redis:
+        cached = await redis.get(cache_key)
+        if cached:
+            return [TickerResponse(**item) for item in json.loads(cached)]
+
     result = await db.execute(
         select(Ticker)
         .join(UserWatchlist, UserWatchlist.symbol == Ticker.symbol)
         .where(UserWatchlist.user_id == current_user.id)
         .order_by(Ticker.symbol)
     )
-    return result.scalars().all()
+    tickers = result.scalars().all()
+
+    if redis:
+        payload = json.dumps(
+            [TickerResponse.model_validate(t, from_attributes=True).model_dump(mode="json") for t in tickers]
+        )
+        await redis.setex(cache_key, WATCHLIST_TTL, payload)
+
+    return tickers
 
 
 @router.post("/tickers", response_model=TickerResponse, status_code=201)
@@ -63,6 +81,7 @@ async def add_ticker(
     payload: TickerCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis | None = Depends(get_redis),
 ):
     symbol = payload.symbol.upper()
 
@@ -99,6 +118,8 @@ async def add_ticker(
     db.add(UserWatchlist(user_id=current_user.id, symbol=symbol))
     await db.commit()
     await db.refresh(ticker)
+    if redis:
+        await invalidate_watchlist(redis, current_user.id)
     return ticker
 
 
@@ -107,6 +128,7 @@ async def remove_ticker(
     symbol: str,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis | None = Depends(get_redis),
 ):
     result = await db.execute(
         delete(UserWatchlist).where(
@@ -117,6 +139,8 @@ async def remove_ticker(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Ticker not in your watchlist")
     await db.commit()
+    if redis:
+        await invalidate_watchlist(redis, current_user.id)
     return None
 
 
@@ -130,7 +154,22 @@ async def list_news(
     offset: int = Query(default=0, ge=0),
     category: str | None = None,
     db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis | None = Depends(get_redis),
+    response: Response = None,
 ):
+    cache_key = f"news:{limit}:{offset}:{category or 'all'}"
+    if redis:
+        cached = await redis.get(cache_key)
+        if cached:
+            data = json.loads(cached)
+            response.headers["X-Total-Count"] = str(data["total"])
+            return [NewsArticleResponse(**item) for item in data["articles"]]
+
+    count_query = select(func.count()).select_from(NewsArticle)
+    if category:
+        count_query = count_query.where(NewsArticle.category == category)
+    total = await db.scalar(count_query)
+
     query = (
         select(NewsArticle)
         .order_by(NewsArticle.published_at.desc())
@@ -140,7 +179,21 @@ async def list_news(
     if category:
         query = query.where(NewsArticle.category == category)
     result = await db.execute(query)
-    return result.scalars().all()
+    articles = result.scalars().all()
+
+    response.headers["X-Total-Count"] = str(total)
+
+    if redis:
+        payload = json.dumps({
+            "total": total,
+            "articles": [
+                NewsArticleResponse.model_validate(a, from_attributes=True).model_dump(mode="json")
+                for a in articles
+            ],
+        })
+        await redis.setex(cache_key, NEWS_TTL, payload)
+
+    return articles
 
 
 # ---------------------------------------------------------------------------
@@ -309,18 +362,18 @@ async def chat(
     if parsed["action"] == "add_ticker":
         ticker_data = TickerCreate(symbol=parsed["ticker"])
         try:
-            await add_ticker(ticker_data, current_user, db)
+            await add_ticker(ticker_data, current_user, db, redis=None)
         except HTTPException:
             parsed["reply"] = f"{parsed['ticker']} is already in your watchlist."
 
     elif parsed["action"] == "remove_ticker":
         try:
-            await remove_ticker(parsed["ticker"], current_user, db)
+            await remove_ticker(parsed["ticker"], current_user, db, redis=None)
         except HTTPException:
             parsed["reply"] = f"{parsed['ticker']} is not in your watchlist."
 
     elif parsed["action"] == "list_tickers":
-        tickers = await list_tickers(current_user, db)
+        tickers = await list_tickers(current_user, db, redis=None)
         if tickers:
             symbols = ", ".join(t.symbol for t in tickers)
             parsed["reply"] = f"Your watchlist: {symbols}"
