@@ -160,7 +160,7 @@ export const alertsApi = {
 
 - Use TypeScript generics on axios calls: `client.get<ResponseType>()`
 - Handle errors at the component level (toast/snackbar), not in the API layer
-- Base URL comes from environment: `REACT_APP_API_URL`
+- Base URL comes from environment: `VITE_API_URL`
 - For new CRUD resources, prefer the grouped object pattern (`alertsApi` style)
 
 ### WebSocket (`hooks/useWebSocket.ts`)
@@ -190,7 +190,7 @@ const { connected } = useWebSocket((msg) => {
 **Hook internals (do not change without Backend coordination):**
 - Auto-reconnects with 3s delay on disconnect
 - Sends "ping" every 30s to keep connection alive
-- WS URL from `REACT_APP_WS_URL` env var, fallback auto-detects protocol
+- WS URL from `VITE_WS_URL` env var, fallback auto-detects protocol
 - `onMessageRef` pattern avoids stale closure issues
 
 **WebSocket message types:** `quotes`, `news`, `alert`, `ipo_update`
@@ -279,21 +279,21 @@ npm start
 npm test
 
 # Run tests with coverage
-npm test -- --coverage --watchAll=false
+npm run test:coverage
 
 # Production build
 npm run build
 
 # Analyze bundle size
-npx source-map-explorer 'build/static/js/*.js'
+npx vite-bundle-visualizer
 ```
 
 ### Environment Variables
 ```bash
 # frontend/.env.development
-REACT_APP_API_URL=http://localhost:8000/api
-REACT_APP_WS_URL=ws://localhost:8000/api/ws
-REACT_APP_GOOGLE_CLIENT_ID=your-google-client-id
+VITE_API_URL=http://localhost:8000/api
+VITE_WS_URL=ws://localhost:8000/api/ws
+VITE_GOOGLE_CLIENT_ID=your-google-client-id
 ```
 
 ---
