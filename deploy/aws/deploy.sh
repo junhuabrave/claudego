@@ -16,8 +16,8 @@ SERVICE_NAME="${SERVICE_NAME:-finmonitor-service}"
 TASK_FAMILY="${TASK_FAMILY:-finmonitor}"
 
 # Fail fast — no hardcoded fallbacks for secrets or environment-specific values
-REACT_APP_GOOGLE_CLIENT_ID="${REACT_APP_GOOGLE_CLIENT_ID:?Set REACT_APP_GOOGLE_CLIENT_ID}"
-REACT_APP_WS_URL="${REACT_APP_WS_URL:?Set REACT_APP_WS_URL}"
+VITE_GOOGLE_CLIENT_ID="${VITE_GOOGLE_CLIENT_ID:?Set VITE_GOOGLE_CLIENT_ID}"
+VITE_WS_URL="${VITE_WS_URL:-}"  # optional — derived from window.location.host if empty
 
 # Network config required for Fargate tasks (migration + service)
 SUBNET_IDS="${SUBNET_IDS:?Set SUBNET_IDS (comma-separated subnet IDs)}"
@@ -40,9 +40,9 @@ docker push "$ECR_BACKEND:latest"
 
 echo "=== Building and pushing frontend ==="
 docker build --platform linux/amd64 -t finmonitor-frontend ./frontend \
-  --build-arg REACT_APP_API_URL=/api \
-  --build-arg REACT_APP_WS_URL="$REACT_APP_WS_URL" \
-  --build-arg REACT_APP_GOOGLE_CLIENT_ID="$REACT_APP_GOOGLE_CLIENT_ID" \
+  --build-arg VITE_API_URL=/api \
+  --build-arg VITE_WS_URL="$VITE_WS_URL" \
+  --build-arg VITE_GOOGLE_CLIENT_ID="$VITE_GOOGLE_CLIENT_ID" \
   --build-arg NGINX_CONF=nginx.prod.conf
 docker tag finmonitor-frontend:latest "$ECR_FRONTEND:latest"
 docker push "$ECR_FRONTEND:latest"
