@@ -14,7 +14,8 @@
     "empty": "No news articles yet. Data will appear once the backend starts polling.",
     "ariaLabel": "News articles",
     "loadMore": "Load more",
-    "loadingMore": "Loading…"
+    "loadingMore": "Loading…",
+    "showing": "Showing {{count}} of {{total}}"
   },
   "watchlist": {
     "title": "Watchlist",

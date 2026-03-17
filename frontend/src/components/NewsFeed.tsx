@@ -12,7 +12,7 @@ import {
   Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import { List as VirtualList, RowComponentProps } from "react-window";
+import { FixedSizeList, ListChildComponentProps } from "react-window";
 import { useTranslation } from "react-i18next";
 import type { NewsArticle } from "../types";
 
@@ -102,14 +102,10 @@ function ArticleCard({ article }: { article: NewsArticle }) {
   );
 }
 
-interface NewsRowProps {
-  articles: NewsArticle[];
-}
-
-function VirtualRow({ index, style, articles }: RowComponentProps<NewsRowProps>) {
+function VirtualRow({ index, style, data }: ListChildComponentProps<NewsArticle[]>) {
   return (
     <div style={{ ...style, paddingBottom: 8, boxSizing: "border-box" }}>
-      <ArticleCard article={articles[index]} />
+      <ArticleCard article={data[index]} />
     </div>
   );
 }
@@ -163,19 +159,17 @@ export default function NewsFeed({
   // Large lists (>15 articles): virtualized for smooth scrolling.
   return (
     <>
-      <Box
-        sx={{ height: listHeight, overflow: "hidden" }}
-        role="list"
-        aria-label={t("news.ariaLabel")}
-      >
-        <VirtualList
-          style={{ width: "100%" }}
-          rowCount={articles.length}
-          rowHeight={ITEM_HEIGHT}
-          rowComponent={VirtualRow}
-          rowProps={{ articles }}
+      <Box role="list" aria-label={t("news.ariaLabel")}>
+        <FixedSizeList
+          height={listHeight}
+          width="100%"
+          itemCount={articles.length}
+          itemSize={ITEM_HEIGHT}
+          itemData={articles}
           overscanCount={3}
-        />
+        >
+          {VirtualRow}
+        </FixedSizeList>
       </Box>
       {loadMoreButton}
     </>
