@@ -2,7 +2,7 @@ import axios from "axios";
 import { getOrCreateSessionId } from "../contexts/AuthContext";
 import type { CandlePoint, ChatResponse, IPOEvent, NewsArticle, PriceAlert, Reminder, Ticker } from "../types";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 const client = axios.create({ baseURL: API_URL });
 
@@ -24,8 +24,8 @@ export const addTicker = (symbol: string, name?: string) =>
 export const removeTicker = (symbol: string) => client.delete(`/tickers/${symbol}`);
 
 // --- News ---
-export const getNews = (limit = 50) =>
-  client.get<NewsArticle[]>("/news", { params: { limit } }).then((r) => r.data);
+export const getNews = (limit = 20, offset = 0) =>
+  client.get<NewsArticle[]>("/news", { params: { limit, offset } }).then((r) => r.data);
 
 // --- IPOs ---
 export const getIPOs = () => client.get<IPOEvent[]>("/ipos").then((r) => r.data);

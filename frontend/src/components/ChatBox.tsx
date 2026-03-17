@@ -20,11 +20,15 @@ interface Message {
 
 interface Props {
   onTickerChanged: () => void;
+  onOptimisticMutation?: (action: "add" | "remove", symbol: string) => void;
 }
 
 // Mirrors backend: app/services/chat.py  r"(\^?[a-zA-Z0-9][\w.-]{0,14})"
 // Supports: AAPL, ^KS11, VOD.L, 005930.KS
 const TICKER_RE = /^\^?[A-Z0-9][\w.-]{0,14}$/i;
+
+const ADD_RE = /^(?:add|watch|track|follow)\s+(\S+)/i;
+const REMOVE_RE = /^(?:remove|delete|unwatch|untrack|unfollow|drop)\s+(\S+)/i;
 
 /** Extract the ticker token from an add/remove command, or null if not an add/remove. */
 function extractTicker(text: string): string | null {
@@ -34,7 +38,16 @@ function extractTicker(text: string): string | null {
   return m ? m[1] : null;
 }
 
-export default function ChatBox({ onTickerChanged }: Props) {
+/** Detect the mutation intent of a command before sending to the API. */
+function detectIntent(text: string): { action: "add" | "remove"; symbol: string } | null {
+  const add = text.match(ADD_RE);
+  if (add) return { action: "add", symbol: add[1].toUpperCase() };
+  const remove = text.match(REMOVE_RE);
+  if (remove) return { action: "remove", symbol: remove[1].toUpperCase() };
+  return null;
+}
+
+export default function ChatBox({ onTickerChanged, onOptimisticMutation }: Props) {
   const { t } = useTranslation();
 
   const [messages, setMessages] = useState<Message[]>([
@@ -71,6 +84,12 @@ export default function ChatBox({ onTickerChanged }: Props) {
     setSending(true);
     scrollToBottom();
 
+    // Fire optimistic update immediately — before the API round-trip.
+    const intent = detectIntent(text);
+    if (intent && onOptimisticMutation) {
+      onOptimisticMutation(intent.action, intent.symbol);
+    }
+
     try {
       const resp = await sendChatMessage(text);
       const botMsg: Message = { id: nextId.current++, text: resp.reply, from: "bot" };
@@ -85,6 +104,8 @@ export default function ChatBox({ onTickerChanged }: Props) {
         from: "bot",
       };
       setMessages((prev) => [...prev, errMsg]);
+      // Resync cache to roll back any optimistic update made above.
+      if (intent) onTickerChanged();
     } finally {
       setSending(false);
       scrollToBottom();

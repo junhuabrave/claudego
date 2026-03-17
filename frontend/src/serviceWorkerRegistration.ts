@@ -1,6 +1,6 @@
-// CRA service worker registration — only activates in production builds.
+// Service worker registration — only activates in production builds.
 // Precaches static assets so the app loads offline after the first visit.
-// API response caching requires custom workbox strategies (Phase 2 / post-Vite).
+// TODO(Phase 3): migrate to vite-plugin-pwa for Workbox-based caching strategies.
 
 const isLocalhost = Boolean(
   window.location.hostname === "localhost" ||
@@ -14,12 +14,13 @@ type Config = {
 };
 
 export function register(config?: Config): void {
-  if (process.env.NODE_ENV === "production" && "serviceWorker" in navigator) {
-    const publicUrl = new URL(process.env.PUBLIC_URL, window.location.href);
+  if (import.meta.env.PROD && "serviceWorker" in navigator) {
+    const baseUrl = import.meta.env.BASE_URL ?? "/";
+    const publicUrl = new URL(baseUrl, window.location.href);
     if (publicUrl.origin !== window.location.origin) return;
 
     window.addEventListener("load", () => {
-      const swUrl = `${process.env.PUBLIC_URL}/service-worker.js`;
+      const swUrl = `${baseUrl}service-worker.js`;
       if (isLocalhost) {
         checkValidServiceWorker(swUrl, config);
         navigator.serviceWorker.ready.then(() => {

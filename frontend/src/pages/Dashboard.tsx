@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useState } from "react";
+import React, { Suspense, lazy, useCallback, useContext, useEffect, useState } from "react";
 import {
   Alert,
   AppBar,
@@ -23,18 +23,18 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import { Trans, useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import AlertsDialog from "../components/AlertsDialog";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+// Heavy dialogs and tab-gated panels are lazy-loaded.
+const AlertsDialog = lazy(() => import("../components/AlertsDialog"));
+const SetNameDialog = lazy(() => import("../components/SetNameDialog"));
+const StockChartDialog = lazy(() => import("../components/StockChartDialog"));
+const IPOCalendar = lazy(() => import("../components/IPOCalendar"));
+
 import ChatBox from "../components/ChatBox";
-import IPOCalendar from "../components/IPOCalendar";
 import NewsFeed from "../components/NewsFeed";
-import SetNameDialog from "../components/SetNameDialog";
 import StatusBar from "../components/StatusBar";
-import StockChartDialog from "../components/StockChartDialog";
 import UserMenu from "../components/UserMenu";
 import WatchList from "../components/WatchList";
-// NOTE: React.lazy() for dialogs deferred to Phase 2 (Vite migration).
-// CRA's Fast Refresh uses flushSync which is incompatible with Suspense on HMR.
 import {
   IPOCalendarSkeleton,
   NewsFeedSkeleton,
@@ -81,11 +81,22 @@ export default function Dashboard() {
     queryFn: getTickers,
   });
 
-  const { data: news = [], isLoading: loadingNews } = useQuery({
+  const PAGE_SIZE = 20;
+  const {
+    data: newsPages,
+    isLoading: loadingNews,
+    fetchNextPage: fetchMoreNews,
+    hasNextPage: hasMoreNews,
+    isFetchingNextPage: loadingMoreNews,
+  } = useInfiniteQuery({
     queryKey: ["news"],
-    queryFn: () => getNews(),
+    queryFn: ({ pageParam }) => getNews(PAGE_SIZE, (pageParam as number) * PAGE_SIZE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === PAGE_SIZE ? pages.length : undefined,
     staleTime: 60_000,
   });
+  const news = newsPages?.pages.flat() ?? [];
 
   const { data: ipos = [], isLoading: loadingIPOs } = useQuery({
     queryKey: ["ipos"],
@@ -112,16 +123,55 @@ export default function Dashboard() {
     },
   });
 
+  // Optimistic handler for chat-triggered add/remove. Called before the API
+  // round-trip so the UI responds instantly. The caller (ChatBox) invalidates
+  // on success (real data replaces placeholder) or on error (rollback).
+  const handleOptimisticMutation = useCallback(
+    (action: "add" | "remove", symbol: string) => {
+      const key = ["tickers", user?.id];
+      if (action === "add") {
+        queryClient.setQueryData<Ticker[]>(key, (old = []) => {
+          if (old.some((tk) => tk.symbol === symbol)) return old;
+          const placeholder: Ticker = {
+            id: -Date.now(),
+            symbol,
+            name: "",
+            exchange: "",
+            last_price: null,
+            change_percent: null,
+            active: true,
+            created_at: new Date().toISOString(),
+          };
+          return [...old, placeholder];
+        });
+      } else {
+        queryClient.setQueryData<Ticker[]>(key, (old = []) =>
+          old.filter((tk) => tk.symbol !== symbol)
+        );
+      }
+    },
+    [queryClient, user?.id]
+  );
+
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const handleWSMessage = useCallback(
     (msg: WSMessage) => {
       switch (msg.type) {
-        case "news":
-          queryClient.setQueryData<NewsArticle[]>(["news"], (old) => {
-            const existing = old ?? [];
-            return [msg.data as unknown as NewsArticle, ...existing].slice(0, 100);
-          });
+        case "news": {
+          const article = msg.data as unknown as NewsArticle;
+          queryClient.setQueryData<{ pages: NewsArticle[][]; pageParams: unknown[] }>(
+            ["news"],
+            (old) => {
+              if (!old) return old;
+              const [first, ...rest] = old.pages;
+              return {
+                ...old,
+                pages: [[article, ...(first ?? [])].slice(0, 100), ...rest],
+              };
+            }
+          );
           break;
+        }
         case "quotes":
           queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] });
           break;
@@ -254,7 +304,13 @@ export default function Dashboard() {
                 {loadingNews ? (
                   <NewsFeedSkeleton />
                 ) : (
-                  <NewsFeed articles={news} listHeight={500} />
+                  <NewsFeed
+                    articles={news}
+                    listHeight={500}
+                    onLoadMore={fetchMoreNews}
+                    hasMore={hasMoreNews}
+                    loadingMore={loadingMoreNews}
+                  />
                 )}
               </Box>
             </Paper>
@@ -284,8 +340,13 @@ export default function Dashboard() {
                 <Tab label={t("reminders.title")} />
               </Tabs>
               <Box sx={{ p: 2, maxHeight: "40vh", overflow: "auto" }}>
-                {rightTab === 0 &&
-                  (loadingIPOs ? <IPOCalendarSkeleton /> : <IPOCalendar ipos={ipos} />)}
+                {rightTab === 0 && (
+                  loadingIPOs ? <IPOCalendarSkeleton /> : (
+                    <Suspense fallback={<IPOCalendarSkeleton />}>
+                      <IPOCalendar ipos={ipos} />
+                    </Suspense>
+                  )
+                )}
                 {rightTab === 1 && (
                   <Typography color="text.secondary">{t("reminders.empty")}</Typography>
                 )}
@@ -300,23 +361,26 @@ export default function Dashboard() {
                 onTickerChanged={() =>
                   queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] })
                 }
+                onOptimisticMutation={handleOptimisticMutation}
               />
             </Paper>
           </Grid>
         </Grid>
       </Container>
 
-      <StockChartDialog ticker={selectedTicker} onClose={() => setSelectedTicker(null)} />
+      <Suspense fallback={null}>
+        <StockChartDialog ticker={selectedTicker} onClose={() => setSelectedTicker(null)} />
 
-      {alertsSymbol && (
-        <AlertsDialog
-          open={true}
-          symbol={alertsSymbol}
-          onClose={() => setAlertsSymbol(null)}
-        />
-      )}
+        {alertsSymbol && (
+          <AlertsDialog
+            open={true}
+            symbol={alertsSymbol}
+            onClose={() => setAlertsSymbol(null)}
+          />
+        )}
 
-      <SetNameDialog open={setNameOpen} onClose={() => setSetNameOpen(false)} />
+        <SetNameDialog open={setNameOpen} onClose={() => setSetNameOpen(false)} />
+      </Suspense>
 
       {/* Price alert Snackbars */}
       {activeAlerts.map((a) => (

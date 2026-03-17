@@ -24,32 +24,32 @@ const MOCK_ALERT: PriceAlert = {
 };
 
 function renderDialog(symbol = "AAPL") {
-  return render(<AlertsDialog open symbol={symbol} onClose={jest.fn()} />);
+  return render(<AlertsDialog open symbol={symbol} onClose={vi.fn()} />);
 }
 
 // ---- AlertsDialog tests -----------------------------------------------------
 
 test("renders dialog title with correct symbol", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog("MSFT");
   expect(await screen.findByText(/Price Alerts — MSFT/i)).toBeInTheDocument();
 });
 
 test("loads and displays existing alerts", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([MOCK_ALERT]);
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([MOCK_ALERT]);
   renderDialog("AAPL");
   expect(await screen.findByText(/≥ 5%/i)).toBeInTheDocument();
 });
 
 test("shows empty state when no alerts", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog("AAPL");
   expect(await screen.findByText(/No alerts set for AAPL/i)).toBeInTheDocument();
 });
 
 test("add alert calls alertsApi.create with correct payload", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
-  const createSpy = jest.spyOn(api.alertsApi, "create").mockResolvedValue({
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([]);
+  const createSpy = vi.spyOn(api.alertsApi, "create").mockResolvedValue({
     ...MOCK_ALERT,
     id: 2,
     threshold_pct: 10,
@@ -73,7 +73,7 @@ test("add alert calls alertsApi.create with correct payload", async () => {
 });
 
 test("shows error for threshold > 100", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([]);
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([]);
   renderDialog();
   await screen.findByLabelText(/Threshold %/i);
 
@@ -84,8 +84,8 @@ test("shows error for threshold > 100", async () => {
 });
 
 test("delete alert calls alertsApi.remove", async () => {
-  jest.spyOn(api.alertsApi, "list").mockResolvedValue([MOCK_ALERT]);
-  const removeSpy = jest.spyOn(api.alertsApi, "remove").mockResolvedValue(undefined);
+  vi.spyOn(api.alertsApi, "list").mockResolvedValue([MOCK_ALERT]);
+  const removeSpy = vi.spyOn(api.alertsApi, "remove").mockResolvedValue(undefined);
 
   renderDialog("AAPL");
   await screen.findByText(/≥ 5%/i);
@@ -108,12 +108,12 @@ const MOCK_TICKER: Ticker = {
 };
 
 test("WatchList renders bell icon button for each ticker", () => {
-  const onManageAlerts = jest.fn();
+  const onManageAlerts = vi.fn();
   render(
     <WatchList
       tickers={[MOCK_TICKER]}
-      onRemove={jest.fn()}
-      onSelectSymbol={jest.fn()}
+      onRemove={vi.fn()}
+      onSelectSymbol={vi.fn()}
       onManageAlerts={onManageAlerts}
     />
   );
@@ -123,12 +123,12 @@ test("WatchList renders bell icon button for each ticker", () => {
 });
 
 test("clicking bell icon calls onManageAlerts with correct symbol", () => {
-  const onManageAlerts = jest.fn();
+  const onManageAlerts = vi.fn();
   render(
     <WatchList
       tickers={[MOCK_TICKER]}
-      onRemove={jest.fn()}
-      onSelectSymbol={jest.fn()}
+      onRemove={vi.fn()}
+      onSelectSymbol={vi.fn()}
       onManageAlerts={onManageAlerts}
     />
   );

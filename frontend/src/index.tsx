@@ -18,7 +18,7 @@ registerSW();
 // Collect Core Web Vitals.
 // In production pipe to analytics: reportWebVitals((m) => fetch('/api/analytics/vitals', { method: 'POST', body: JSON.stringify(m) }));
 reportWebVitals(
-  process.env.NODE_ENV === "development"
+  import.meta.env.DEV
     ? (metric) => console.warn("[Web Vitals]", metric.name, metric.value.toFixed(1))
     : undefined
 );

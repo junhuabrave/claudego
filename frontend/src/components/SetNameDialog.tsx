@@ -10,7 +10,7 @@ import {
 } from "@mui/material";
 import { useAuth } from "../contexts/AuthContext";
 
-const API_URL = process.env.REACT_APP_API_URL || "https://localhost:3443/api";
+const API_URL = import.meta.env.VITE_API_URL || "https://localhost:3443/api";
 
 interface Props {
   open: boolean;
@@ -47,7 +47,7 @@ export default function SetNameDialog({ open, onClose }: Props) {
       <DialogTitle>Welcome! Pick a display name</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          This is how you'll appear in the app. You can change it later.
+          This is how you&apos;ll appear in the app. You can change it later.
         </Typography>
         <TextField
           autoFocus

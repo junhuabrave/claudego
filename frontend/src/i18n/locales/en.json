@@ -12,7 +12,9 @@
   "news": {
     "title": "Breaking News",
     "empty": "No news articles yet. Data will appear once the backend starts polling.",
-    "ariaLabel": "News articles"
+    "ariaLabel": "News articles",
+    "loadMore": "Load more",
+    "loadingMore": "Loading…"
   },
   "watchlist": {
     "title": "Watchlist",

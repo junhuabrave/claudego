@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const apiUrl = process.env.REACT_APP_API_URL || "https://localhost:3443/api";
+  const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:3443/api";
 
   const buildHeaders = (): Record<string, string> => {
     const headers: Record<string, string> = {
