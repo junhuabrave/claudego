@@ -2,7 +2,7 @@ import axios from "axios";
 import { getOrCreateSessionId } from "../contexts/AuthContext";
 import type { CandlePoint, ChatResponse, IPOEvent, NewsArticle, PriceAlert, Reminder, Ticker } from "../types";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:8000/api";
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 
 const client = axios.create({ baseURL: API_URL });
 

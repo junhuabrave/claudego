@@ -1,4 +1,4 @@
-import React, { useCallback, useContext, useEffect, useState } from "react";
+import React, { Suspense, lazy, useCallback, useContext, useEffect, useState } from "react";
 import {
   Alert,
   AppBar,
@@ -24,17 +24,17 @@ import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import { Trans, useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import AlertsDialog from "../components/AlertsDialog";
+// Heavy dialogs are lazy-loaded — they only ship to the user when first opened.
+const AlertsDialog = lazy(() => import("../components/AlertsDialog"));
+const SetNameDialog = lazy(() => import("../components/SetNameDialog"));
+const StockChartDialog = lazy(() => import("../components/StockChartDialog"));
+
 import ChatBox from "../components/ChatBox";
 import IPOCalendar from "../components/IPOCalendar";
 import NewsFeed from "../components/NewsFeed";
-import SetNameDialog from "../components/SetNameDialog";
 import StatusBar from "../components/StatusBar";
-import StockChartDialog from "../components/StockChartDialog";
 import UserMenu from "../components/UserMenu";
 import WatchList from "../components/WatchList";
-// NOTE: React.lazy() for dialogs deferred to Phase 2 (Vite migration).
-// CRA's Fast Refresh uses flushSync which is incompatible with Suspense on HMR.
 import {
   IPOCalendarSkeleton,
   NewsFeedSkeleton,
@@ -306,17 +306,19 @@ export default function Dashboard() {
         </Grid>
       </Container>
 
-      <StockChartDialog ticker={selectedTicker} onClose={() => setSelectedTicker(null)} />
+      <Suspense fallback={null}>
+        <StockChartDialog ticker={selectedTicker} onClose={() => setSelectedTicker(null)} />
 
-      {alertsSymbol && (
-        <AlertsDialog
-          open={true}
-          symbol={alertsSymbol}
-          onClose={() => setAlertsSymbol(null)}
-        />
-      )}
+        {alertsSymbol && (
+          <AlertsDialog
+            open={true}
+            symbol={alertsSymbol}
+            onClose={() => setAlertsSymbol(null)}
+          />
+        )}
 
-      <SetNameDialog open={setNameOpen} onClose={() => setSetNameOpen(false)} />
+        <SetNameDialog open={setNameOpen} onClose={() => setSetNameOpen(false)} />
+      </Suspense>
 
       {/* Price alert Snackbars */}
       {activeAlerts.map((a) => (

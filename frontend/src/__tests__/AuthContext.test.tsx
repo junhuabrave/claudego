@@ -33,7 +33,7 @@ function renderWithAuth(ui: React.ReactElement) {
 
 // Stub fetch to return an anonymous user
 function mockFetchAnon(id = 99) {
-  global.fetch = jest.fn().mockResolvedValue({
+  globalThis.fetch = vi.fn().mockResolvedValue({
     ok: true,
     json: async () => ({
       id,
@@ -50,7 +50,7 @@ function mockFetchAnon(id = 99) {
 
 beforeEach(() => {
   localStorage.clear();
-  jest.resetAllMocks();
+  vi.resetAllMocks();
 });
 
 test("getOrCreateSessionId generates and stores a UUID", () => {
@@ -82,7 +82,7 @@ test("logout clears JWT and reloads (via window.location.reload)", async () => {
   mockFetchAnon();
   localStorage.setItem("finmonitor_token", "fake-jwt");
 
-  const reloadMock = jest.fn();
+  const reloadMock = vi.fn();
   Object.defineProperty(window, "location", {
     value: { reload: reloadMock },
     writable: true,

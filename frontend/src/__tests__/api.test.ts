@@ -7,24 +7,17 @@
  * Run with: npm test -- --watchAll=false
  */
 
-// Re-export the configured client by importing api.ts side-effects
-// (the interceptors register on the module-level 'client' instance)
 import "../services/api";
+import { getOrCreateSessionId } from "../contexts/AuthContext";
 
 const SESSION_KEY = "finmonitor_session_id";
 const TOKEN_KEY = "finmonitor_token";
-
-// Use a real mock adapter on axios default instance
-// Note: api.ts creates its own axios instance ('client'), so we test indirectly
-// via integration test pattern below — see also UserMenu.test.tsx for component tests.
 
 beforeEach(() => {
   localStorage.clear();
 });
 
 test("getOrCreateSessionId is called on every request (smoke test)", () => {
-  // Just confirm the session_id key ends up in localStorage after import
-  const { getOrCreateSessionId } = require("../contexts/AuthContext");
   const id = getOrCreateSessionId();
   expect(id).toBeTruthy();
   expect(localStorage.getItem(SESSION_KEY)).toBe(id);

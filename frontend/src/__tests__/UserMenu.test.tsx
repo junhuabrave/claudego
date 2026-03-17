@@ -11,7 +11,7 @@ import { GoogleOAuthProvider } from "@react-oauth/google";
 import UserMenu from "../components/UserMenu";
 import * as AuthContext from "../contexts/AuthContext";
 
-jest.mock("@react-oauth/google", () => ({
+vi.mock("@react-oauth/google", () => ({
   GoogleOAuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   GoogleLogin: ({ onSuccess }: { onSuccess: (r: { credential: string }) => void }) => (
     <button data-testid="google-login-btn" onClick={() => onSuccess({ credential: "fake" })}>
@@ -25,11 +25,11 @@ function renderMenu(overrides: Partial<AuthContext.AuthContextValue> = {}) {
     user: null,
     isAuthenticated: false,
     isLoading: false,
-    login: jest.fn(),
-    logout: jest.fn(),
-    refreshUser: jest.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    refreshUser: vi.fn(),
   };
-  jest.spyOn(AuthContext, "useAuth").mockReturnValue({ ...defaults, ...overrides });
+  vi.spyOn(AuthContext, "useAuth").mockReturnValue({ ...defaults, ...overrides });
 
   return render(
     <GoogleOAuthProvider clientId="test-client-id">
@@ -38,7 +38,7 @@ function renderMenu(overrides: Partial<AuthContext.AuthContextValue> = {}) {
   );
 }
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => vi.restoreAllMocks());
 
 test("shows Google sign-in button when anonymous", () => {
   renderMenu({ isAuthenticated: false, user: null });

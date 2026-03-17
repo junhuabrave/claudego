@@ -10,62 +10,59 @@
     "@mui/x-date-pickers": "^7.23.2",
     "@react-oauth/google": "^0.12.2",
     "@tanstack/react-query": "^5.90.21",
-    "@testing-library/dom": "^10.4.1",
-    "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.3.2",
-    "@testing-library/user-event": "^14.6.1",
-    "ajv": "^8.18.0",
     "axios": "^1.7.9",
     "dayjs": "^1.11.13",
     "i18next": "^25.8.18",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-i18next": "^16.5.8",
-    "react-scripts": "5.0.1",
     "react-virtualized-auto-sizer": "^2.0.3",
     "react-window": "^2.2.7",
     "recharts": "^2.13.3",
-    "typescript": "^5.7.2",
     "web-vitals": "^4.2.4"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^25.5.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "@vitest/coverage-v8": "^4.1.0",
+    "ajv": "^8.18.0",
     "eslint-config-prettier": "^10.1.8",
     "husky": "^9.1.7",
+    "jsdom": "^26.0.0",
     "lint-staged": "^16.3.3",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.1",
+    "vitest": "^4.1.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
+    "start": "vite",
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts,.tsx --max-warnings 0",
     "format": "prettier --write src",
-    "ci": "npm run lint && react-scripts test --watchAll=false --ci",
+    "ci": "npm run lint && vitest run --reporter=verbose",
     "prepare": "husky || true"
   },
-  "jest": {
-    "transformIgnorePatterns": [
-      "node_modules/(?!(axios)/)"
-    ],
-    "moduleNameMapper": {
-      "^.*/workers/createPriceStatsWorker$": "<rootDir>/src/__mocks__/createPriceStatsWorker.ts"
-    }
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "eslint --max-warnings 0",
+      "prettier --write"
     ]
   }
 }

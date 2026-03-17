@@ -28,7 +28,7 @@ export default function UserMenu() {
   const [setNameOpen, setSetNameOpen] = useState(false);
   const [loginError, setLoginError] = useState(false);
 
-  const apiUrl = process.env.REACT_APP_API_URL || "https://localhost:3443/api";
+  const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:3443/api";
 
   const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
     if (!credentialResponse.credential) return;
