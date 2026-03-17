@@ -1,5 +1,16 @@
 import React from "react";
-import { Box, Card, CardContent, Chip, Link, List, ListItem, Typography } from "@mui/material";
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  CircularProgress,
+  Link,
+  List,
+  ListItem,
+  Typography,
+} from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { List as VirtualList, RowComponentProps } from "react-window";
 import { useTranslation } from "react-i18next";
@@ -9,6 +20,9 @@ interface Props {
   articles: NewsArticle[];
   /** Container height in px for virtualized list. Default 500. */
   listHeight?: number;
+  onLoadMore?: () => void;
+  hasMore?: boolean;
+  loadingMore?: boolean;
 }
 
 // Virtualize when article count exceeds this threshold.
@@ -100,7 +114,13 @@ function VirtualRow({ index, style, articles }: RowComponentProps<NewsRowProps>)
   );
 }
 
-export default function NewsFeed({ articles, listHeight = 500 }: Props) {
+export default function NewsFeed({
+  articles,
+  listHeight = 500,
+  onLoadMore,
+  hasMore,
+  loadingMore,
+}: Props) {
   const { t } = useTranslation();
 
   if (!articles.length) {
@@ -111,34 +131,53 @@ export default function NewsFeed({ articles, listHeight = 500 }: Props) {
     );
   }
 
+  const loadMoreButton = hasMore && (
+    <Box sx={{ display: "flex", justifyContent: "center", pt: 1 }}>
+      <Button
+        size="small"
+        onClick={onLoadMore}
+        disabled={loadingMore}
+        startIcon={loadingMore ? <CircularProgress size={14} /> : undefined}
+      >
+        {loadingMore ? t("news.loadingMore") : t("news.loadMore")}
+      </Button>
+    </Box>
+  );
+
   // Small lists: plain rendering with no virtualization overhead.
   if (articles.length <= VIRTUALIZE_THRESHOLD) {
     return (
-      <List disablePadding aria-label={t("news.ariaLabel")}>
-        {articles.map((article) => (
-          <ListItem key={article.id} disablePadding sx={{ mb: 1 }}>
-            <ArticleCard article={article} />
-          </ListItem>
-        ))}
-      </List>
+      <>
+        <List disablePadding aria-label={t("news.ariaLabel")}>
+          {articles.map((article) => (
+            <ListItem key={article.id} disablePadding sx={{ mb: 1 }}>
+              <ArticleCard article={article} />
+            </ListItem>
+          ))}
+        </List>
+        {loadMoreButton}
+      </>
     );
   }
 
   // Large lists (>15 articles): virtualized for smooth scrolling.
   return (
-    <Box
-      sx={{ height: listHeight, overflow: "hidden" }}
-      role="list"
-      aria-label={t("news.ariaLabel")}
-    >
-      <VirtualList
-        style={{ width: "100%" }}
-        rowCount={articles.length}
-        rowHeight={ITEM_HEIGHT}
-        rowComponent={VirtualRow}
-        rowProps={{ articles }}
-        overscanCount={3}
-      />
-    </Box>
+    <>
+      <Box
+        sx={{ height: listHeight, overflow: "hidden" }}
+        role="list"
+        aria-label={t("news.ariaLabel")}
+      >
+        <VirtualList
+          style={{ width: "100%" }}
+          rowCount={articles.length}
+          rowHeight={ITEM_HEIGHT}
+          rowComponent={VirtualRow}
+          rowProps={{ articles }}
+          overscanCount={3}
+        />
+      </Box>
+      {loadMoreButton}
+    </>
   );
 }

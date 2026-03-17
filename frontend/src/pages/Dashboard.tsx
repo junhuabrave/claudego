@@ -23,7 +23,7 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import { Trans, useTranslation } from "react-i18next";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 // Heavy dialogs and tab-gated panels are lazy-loaded.
 const AlertsDialog = lazy(() => import("../components/AlertsDialog"));
 const SetNameDialog = lazy(() => import("../components/SetNameDialog"));
@@ -81,11 +81,22 @@ export default function Dashboard() {
     queryFn: getTickers,
   });
 
-  const { data: news = [], isLoading: loadingNews } = useQuery({
+  const PAGE_SIZE = 20;
+  const {
+    data: newsPages,
+    isLoading: loadingNews,
+    fetchNextPage: fetchMoreNews,
+    hasNextPage: hasMoreNews,
+    isFetchingNextPage: loadingMoreNews,
+  } = useInfiniteQuery({
     queryKey: ["news"],
-    queryFn: () => getNews(),
+    queryFn: ({ pageParam }) => getNews(PAGE_SIZE, (pageParam as number) * PAGE_SIZE),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.length === PAGE_SIZE ? pages.length : undefined,
     staleTime: 60_000,
   });
+  const news = newsPages?.pages.flat() ?? [];
 
   const { data: ipos = [], isLoading: loadingIPOs } = useQuery({
     queryKey: ["ipos"],
@@ -146,12 +157,21 @@ export default function Dashboard() {
   const handleWSMessage = useCallback(
     (msg: WSMessage) => {
       switch (msg.type) {
-        case "news":
-          queryClient.setQueryData<NewsArticle[]>(["news"], (old) => {
-            const existing = old ?? [];
-            return [msg.data as unknown as NewsArticle, ...existing].slice(0, 100);
-          });
+        case "news": {
+          const article = msg.data as unknown as NewsArticle;
+          queryClient.setQueryData<{ pages: NewsArticle[][]; pageParams: unknown[] }>(
+            ["news"],
+            (old) => {
+              if (!old) return old;
+              const [first, ...rest] = old.pages;
+              return {
+                ...old,
+                pages: [[article, ...(first ?? [])].slice(0, 100), ...rest],
+              };
+            }
+          );
           break;
+        }
         case "quotes":
           queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] });
           break;
@@ -284,7 +304,13 @@ export default function Dashboard() {
                 {loadingNews ? (
                   <NewsFeedSkeleton />
                 ) : (
-                  <NewsFeed articles={news} listHeight={500} />
+                  <NewsFeed
+                    articles={news}
+                    listHeight={500}
+                    onLoadMore={fetchMoreNews}
+                    hasMore={hasMoreNews}
+                    loadingMore={loadingMoreNews}
+                  />
                 )}
               </Box>
             </Paper>

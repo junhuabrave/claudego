@@ -126,11 +126,17 @@ async def remove_ticker(
 
 @router.get("/news", response_model=list[NewsArticleResponse])
 async def list_news(
-    limit: int = Query(default=50, ge=1, le=200),
+    limit: int = Query(default=20, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     category: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
-    query = select(NewsArticle).order_by(NewsArticle.published_at.desc()).limit(limit)
+    query = (
+        select(NewsArticle)
+        .order_by(NewsArticle.published_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
     if category:
         query = query.where(NewsArticle.category == category)
     result = await db.execute(query)
