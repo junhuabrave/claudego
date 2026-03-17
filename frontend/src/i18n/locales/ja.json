@@ -16,7 +16,8 @@
     "empty": "ニュース記事がありません。バックエンドがデータを取得すると表示されます。",
     "ariaLabel": "ニュース記事一覧",
     "loadMore": "もっと見る",
-    "loadingMore": "読み込み中…"
+    "loadingMore": "読み込み中…",
+    "showing": "{{total}}件中{{count}}件表示"
   },
   "watchlist": {
     "title": "ウォッチリスト",

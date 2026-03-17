@@ -17,7 +17,7 @@ import BarChartIcon from "@mui/icons-material/BarChart";
 import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
 import TrendingUpIcon from "@mui/icons-material/TrendingUp";
 import TrendingDownIcon from "@mui/icons-material/TrendingDown";
-import { List as VirtualList, RowComponentProps } from "react-window";
+import { FixedSizeList, ListChildComponentProps } from "react-window";
 import { useTranslation } from "react-i18next";
 import type { Ticker } from "../types";
 
@@ -53,19 +53,18 @@ const COL_PRICE = "18%";
 const COL_CHANGE = "22%";
 const COL_ACTIONS = "14%";
 
-function VirtualRow({
-  index,
-  style,
-  tickers,
-  onRemove,
-  onSelectSymbol,
-  onManageAlerts,
-  removeLabel,
-  alertsLabel,
-  chartLabel,
-  removeTooltip,
-  alertsTooltip,
-}: RowComponentProps<VRowData>) {
+function VirtualRow({ index, style, data }: ListChildComponentProps<VRowData>) {
+  const {
+    tickers,
+    onRemove,
+    onSelectSymbol,
+    onManageAlerts,
+    removeLabel,
+    alertsLabel,
+    chartLabel,
+    removeTooltip,
+    alertsTooltip,
+  } = data;
   const t = tickers[index];
   const isUp = (t.change_percent ?? 0) >= 0;
 
@@ -320,14 +319,16 @@ export default function WatchList({ tickers, onRemove, onSelectSymbol, onManageA
     <Box role="table" aria-label={t("watchlist.ariaLabel")}>
       <VirtualHeader />
       <Box sx={{ height: VIRTUAL_LIST_HEIGHT }}>
-        <VirtualList
-          style={{ width: "100%" }}
-          rowCount={tickers.length}
-          rowHeight={ROW_HEIGHT}
-          rowComponent={VirtualRow}
-          rowProps={rowProps}
+        <FixedSizeList
+          height={VIRTUAL_LIST_HEIGHT}
+          width="100%"
+          itemCount={tickers.length}
+          itemSize={ROW_HEIGHT}
+          itemData={rowProps}
           overscanCount={5}
-        />
+        >
+          {VirtualRow}
+        </FixedSizeList>
       </Box>
     </Box>
   );

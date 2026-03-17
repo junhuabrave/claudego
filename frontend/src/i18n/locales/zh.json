@@ -16,7 +16,8 @@
     "empty": "暂无新闻。后端开始拉取数据后将显示内容。",
     "ariaLabel": "新闻文章列表",
     "loadMore": "加载更多",
-    "loadingMore": "加载中…"
+    "loadingMore": "加载中…",
+    "showing": "共 {{total}} 条，已显示 {{count}} 条"
   },
   "watchlist": {
     "title": "自选股",

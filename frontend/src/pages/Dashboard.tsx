@@ -300,10 +300,18 @@ export default function Dashboard() {
           {/* Left column */}
           <Grid item xs={12} md={7} lg={8}>
             <Paper sx={{ p: 2, mb: 2 }}>
-              <Typography variant="h6" gutterBottom>
-                {t("news.title")}
-              </Typography>
-              <Box sx={{ maxHeight: "60vh", overflow: "hidden" }}>
+              <Box sx={{ display: "flex", alignItems: "baseline", gap: 1, mb: 1 }}>
+                <Typography variant="h6">{t("news.title")}</Typography>
+                {!loadingNews && (newsPages?.pages[0]?.total ?? 0) > 0 && (
+                  <Typography variant="caption" color="text.secondary">
+                    {t("news.showing", {
+                      count: news.length,
+                      total: newsPages!.pages[0].total,
+                    })}
+                  </Typography>
+                )}
+              </Box>
+              <Box sx={{ maxHeight: "60vh", overflow: "auto" }}>
                 {loadingNews ? (
                   <NewsFeedSkeleton />
                 ) : (

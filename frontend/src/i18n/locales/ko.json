@@ -16,7 +16,8 @@
     "empty": "뉴스 기사가 없습니다. 백엔드가 데이터를 수집하면 표시됩니다.",
     "ariaLabel": "뉴스 기사 목록",
     "loadMore": "더 보기",
-    "loadingMore": "로딩 중…"
+    "loadingMore": "로딩 중…",
+    "showing": "{{total}}개 중 {{count}}개 표시"
   },
   "watchlist": {
     "title": "관심 종목",
