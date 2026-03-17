@@ -17,6 +17,8 @@ Active sprint briefs and status reports are in the `sprints/` directory:
 | [auth-security-sprint.md](sprints/auth-security-sprint.md) | Auth/Security team sprint tasks |
 | [test-engineering-sprint.md](sprints/test-engineering-sprint.md) | Test Engineering team sprint tasks |
 | [devops-sprint.md](sprints/devops-sprint.md) | DevOps team sprint tasks |
+| [DAILY_STATUS_PROCESS.md](sprints/DAILY_STATUS_PROCESS.md) | Daily status update template & process |
+| `sprints/daily/` | Daily status files (one per team per day) |
 
 ---
 
@@ -203,6 +205,25 @@ Each file is designed to be used as a **CLAUDE.md** or agent instruction file in
 
 ---
 
+## Active Team Branches
+
+**Current branch-to-team mapping.** Update this table when branches are merged or new ones created.
+
+| Team | Branch | Worktree | Recent Work | Status |
+|------|--------|----------|-------------|--------|
+| **Backend Python** | `claude/backend-sprint-p0` | — | DB pool tuning, Redis cache, X-Total-Count header | Active |
+| **Frontend React** | `claude/compassionate-rhodes` | — | Vite migration, lazy loading, optimistic UI, news pagination, build version | Active |
+| **Auth & Security** | `claude/romantic-goldstine` | `~/.claude/worktrees/romantic-goldstine` | HTTP security headers, `require_google_user` dep, JWT secret guard | Active |
+| **Test Engineering** | `claude/continue-development-q8xZU` | — | Rebased on main — sprint work not yet started | Active |
+| **DevOps / CI-CD** | `claude/youthful-mendel` | — | Docker PYTHONPATH fix, Secrets Manager JSON (PRs #16, #17) | Merged |
+| **Engineering Director** | `claude/reverent-dijkstra` | `~/.claude/worktrees/reverent-dijkstra` | Team standards, sprint briefs, hiring roadmap (PR #19) | Active |
+
+> **Session startup rule:** When opening a new Claude Code session for a team, check this table
+> for the correct branch name and check it out before doing any work. After merging a branch,
+> update this table with the new branch name.
+
+---
+
 ## Git Branching Strategy
 
 **Trunk-based development** with short-lived feature branches:
@@ -280,8 +301,9 @@ For validation errors (422), FastAPI returns:
 
 ---
 
-## Communication Channels (Recommended)
+## Communication Channels
 
+- **Daily status update**: Every team, before starting work — file in `sprints/daily/`. See [DAILY_STATUS_PROCESS.md](sprints/DAILY_STATUS_PROCESS.md)
 - **Weekly sync**: All teams — 30 min standup on scaling progress
 - **API review**: Backend + Frontend — review OpenAPI changes before implementation
 - **Security review**: Auth + DevOps — weekly threat review and incident response
