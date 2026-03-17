@@ -105,6 +105,9 @@ export default function UserMenu() {
           <Typography variant="caption" color="text.secondary">
             {user?.email}
           </Typography>
+          <Typography variant="caption" display="block" color="text.disabled" sx={{ mt: 0.5 }}>
+            v{__APP_VERSION__}
+          </Typography>
         </Box>
         <Divider />
         <MenuItem
