@@ -18,14 +18,12 @@ import {
 } from "@mui/material";
 import { GoogleLogin, CredentialResponse } from "@react-oauth/google";
 import { useAuth } from "../contexts/AuthContext";
-import SetNameDialog from "./SetNameDialog";
 
 export default function UserMenu() {
   const { user, isAuthenticated, login, logout, refreshUser } = useAuth();
   const [anchor, setAnchor] = useState<null | HTMLElement>(null);
   const [renaming, setRenaming] = useState(false);
   const [newName, setNewName] = useState("");
-  const [setNameOpen, setSetNameOpen] = useState(false);
   const [loginError, setLoginError] = useState(false);
 
   const apiUrl = import.meta.env.VITE_API_URL || "https://localhost:3443/api";
@@ -151,10 +149,6 @@ export default function UserMenu() {
         </DialogActions>
       </Dialog>
 
-      <SetNameDialog
-        open={setNameOpen}
-        onClose={() => setSetNameOpen(false)}
-      />
     </>
   );
 }

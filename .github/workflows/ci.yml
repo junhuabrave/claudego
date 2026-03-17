@@ -21,7 +21,7 @@ jobs:
       - run: cd backend && mypy app/ --ignore-missing-imports
 
   lint-frontend:
-    name: Lint — Frontend (tsc)
+    name: Lint — Frontend (eslint + tsc)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,6 +31,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci --legacy-peer-deps
+      - run: cd frontend && npm run lint
       - run: cd frontend && npx tsc --noEmit
 
   test-backend:
@@ -82,7 +83,7 @@ jobs:
           fail_ci_if_error: false
 
   test-frontend:
-    name: Test — Frontend (jest)
+    name: Test — Frontend (vitest)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +93,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: cd frontend && npm ci --legacy-peer-deps
-      - run: cd frontend && npm test -- --coverage --watchAll=false
+      - run: cd frontend && npm run test:coverage
         env:
           CI: true
 
