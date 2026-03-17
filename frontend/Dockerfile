@@ -5,19 +5,19 @@ COPY package.json package-lock.json ./
 RUN npm install --legacy-peer-deps
 COPY . .
 # Default to /api so nginx proxies to the backend on localhost:8000.
-ARG REACT_APP_API_URL=/api
-ENV REACT_APP_API_URL=$REACT_APP_API_URL
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
 # Leave WS URL empty so useWebSocket.ts derives it from window.location.host at runtime.
-ARG REACT_APP_WS_URL=
-ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
-# Google OAuth client ID — baked into the React bundle at build time.
-ARG REACT_APP_GOOGLE_CLIENT_ID=
-ENV REACT_APP_GOOGLE_CLIENT_ID=$REACT_APP_GOOGLE_CLIENT_ID
+ARG VITE_WS_URL=
+ENV VITE_WS_URL=$VITE_WS_URL
+# Google OAuth client ID — baked into the Vite bundle at build time.
+ARG VITE_GOOGLE_CLIENT_ID=
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npm run build
 
 # Serve stage
 FROM nginx:alpine
-COPY --from=build /app/build /usr/share/nginx/html
+COPY --from=build /app/dist /usr/share/nginx/html
 # NGINX_CONF selects the nginx config:
 #   nginx.conf      — local dev (SSL + Docker Compose service-name upstream)
 #   nginx.prod.conf — production ECS (HTTP-only + localhost upstream)

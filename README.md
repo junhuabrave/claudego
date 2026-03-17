@@ -104,7 +104,7 @@ AWS_ACCOUNT_ID=<your-account-id> bash deploy/aws/deploy.sh
 
 ### Adding a custom domain later
 1. CloudFront → Edit distribution → add CNAME + attach ACM cert
-2. Update `deploy/aws/deploy.sh`: change `REACT_APP_WS_URL` to `wss://yourdomain.com/api/ws`
+2. Update `deploy/aws/deploy.sh`: set `VITE_WS_URL` to `wss://yourdomain.com/api/ws`
 3. Redeploy with `deploy.sh`
 
 ## Configuration
@@ -129,7 +129,7 @@ All configuration is environment-based for cloud portability. See:
 - Use `mkcert` for trusted local certs — no browser warnings
 - `mkcert -install` requires an interactive terminal (sudo) — cannot be scripted
 - Nginx inside Docker must use the **Docker service name** (`http://backend:8000`) not `localhost` for proxying between containers
-- `REACT_APP_*` env vars are baked into the React build at build time — set them via `--build-arg` in Docker, not just `.env`
+- `VITE_*` env vars are baked into the Vite build at build time — set them via `--build-arg` in Docker, not just `.env`
 
 ### AWS CloudFront + ALB
 - When CloudFront forwards to an HTTP-only ALB, set the origin protocol to **`http-only`** — CloudFront defaults to `https-only` which causes 504 errors
