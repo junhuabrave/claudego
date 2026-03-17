@@ -43,7 +43,7 @@ import {
 import { ColorModeContext } from "../contexts/ColorModeContext";
 import { useAuth } from "../contexts/AuthContext";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { getIPOs, getNews, getTickers, removeTicker } from "../services/api";
+import { getIPOs, getNews, getTickers, removeTicker, type NewsPage } from "../services/api";
 import type { AlertTriggered, NewsArticle, Ticker, WSMessage } from "../types";
 
 const SUPPORTED_LANGUAGES = [
@@ -92,11 +92,13 @@ export default function Dashboard() {
     queryKey: ["news"],
     queryFn: ({ pageParam }) => getNews(PAGE_SIZE, (pageParam as number) * PAGE_SIZE),
     initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) =>
-      lastPage.length === PAGE_SIZE ? pages.length : undefined,
+    getNextPageParam: (lastPage, pages) => {
+      const fetched = pages.length * PAGE_SIZE;
+      return fetched < lastPage.total ? pages.length : undefined;
+    },
     staleTime: 60_000,
   });
-  const news = newsPages?.pages.flat() ?? [];
+  const news = newsPages?.pages.flatMap((p) => p.articles) ?? [];
 
   const { data: ipos = [], isLoading: loadingIPOs } = useQuery({
     queryKey: ["ipos"],
@@ -159,15 +161,16 @@ export default function Dashboard() {
       switch (msg.type) {
         case "news": {
           const article = msg.data as unknown as NewsArticle;
-          queryClient.setQueryData<{ pages: NewsArticle[][]; pageParams: unknown[] }>(
+          queryClient.setQueryData<{ pages: NewsPage[]; pageParams: unknown[] }>(
             ["news"],
             (old) => {
               if (!old) return old;
               const [first, ...rest] = old.pages;
-              return {
-                ...old,
-                pages: [[article, ...(first ?? [])].slice(0, 100), ...rest],
+              const updatedFirst: NewsPage = {
+                total: (first?.total ?? 0) + 1,
+                articles: [article, ...(first?.articles ?? [])].slice(0, 100),
               };
+              return { ...old, pages: [updatedFirst, ...rest] };
             }
           );
           break;
