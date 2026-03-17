@@ -1,7 +1,20 @@
+import { execSync } from "child_process";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+const gitSha = (() => {
+  try {
+    return execSync("git rev-parse --short HEAD").toString().trim();
+  } catch {
+    return "dev";
+  }
+})();
+const buildDate = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(`${buildDate} (${gitSha})`),
+  },
   plugins: [react()],
   server: {
     port: 3000,
