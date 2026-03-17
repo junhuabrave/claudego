@@ -24,8 +24,16 @@ export const addTicker = (symbol: string, name?: string) =>
 export const removeTicker = (symbol: string) => client.delete(`/tickers/${symbol}`);
 
 // --- News ---
-export const getNews = (limit = 20, offset = 0) =>
-  client.get<NewsArticle[]>("/news", { params: { limit, offset } }).then((r) => r.data);
+export interface NewsPage {
+  articles: NewsArticle[];
+  total: number;
+}
+
+export const getNews = (limit = 20, offset = 0): Promise<NewsPage> =>
+  client.get<NewsArticle[]>("/news", { params: { limit, offset } }).then((r) => ({
+    articles: r.data,
+    total: parseInt(r.headers["x-total-count"] ?? "0", 10),
+  }));
 
 // --- IPOs ---
 export const getIPOs = () => client.get<IPOEvent[]>("/ipos").then((r) => r.data);
