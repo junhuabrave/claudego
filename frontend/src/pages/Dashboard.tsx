@@ -24,13 +24,13 @@ import Brightness4Icon from "@mui/icons-material/Brightness4";
 import Brightness7Icon from "@mui/icons-material/Brightness7";
 import { Trans, useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-// Heavy dialogs are lazy-loaded — they only ship to the user when first opened.
+// Heavy dialogs and tab-gated panels are lazy-loaded.
 const AlertsDialog = lazy(() => import("../components/AlertsDialog"));
 const SetNameDialog = lazy(() => import("../components/SetNameDialog"));
 const StockChartDialog = lazy(() => import("../components/StockChartDialog"));
+const IPOCalendar = lazy(() => import("../components/IPOCalendar"));
 
 import ChatBox from "../components/ChatBox";
-import IPOCalendar from "../components/IPOCalendar";
 import NewsFeed from "../components/NewsFeed";
 import StatusBar from "../components/StatusBar";
 import UserMenu from "../components/UserMenu";
@@ -111,6 +111,36 @@ export default function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] });
     },
   });
+
+  // Optimistic handler for chat-triggered add/remove. Called before the API
+  // round-trip so the UI responds instantly. The caller (ChatBox) invalidates
+  // on success (real data replaces placeholder) or on error (rollback).
+  const handleOptimisticMutation = useCallback(
+    (action: "add" | "remove", symbol: string) => {
+      const key = ["tickers", user?.id];
+      if (action === "add") {
+        queryClient.setQueryData<Ticker[]>(key, (old = []) => {
+          if (old.some((tk) => tk.symbol === symbol)) return old;
+          const placeholder: Ticker = {
+            id: -Date.now(),
+            symbol,
+            name: "",
+            exchange: "",
+            last_price: null,
+            change_percent: null,
+            active: true,
+            created_at: new Date().toISOString(),
+          };
+          return [...old, placeholder];
+        });
+      } else {
+        queryClient.setQueryData<Ticker[]>(key, (old = []) =>
+          old.filter((tk) => tk.symbol !== symbol)
+        );
+      }
+    },
+    [queryClient, user?.id]
+  );
 
   // ── WebSocket ─────────────────────────────────────────────────────────────
   const handleWSMessage = useCallback(
@@ -284,8 +314,13 @@ export default function Dashboard() {
                 <Tab label={t("reminders.title")} />
               </Tabs>
               <Box sx={{ p: 2, maxHeight: "40vh", overflow: "auto" }}>
-                {rightTab === 0 &&
-                  (loadingIPOs ? <IPOCalendarSkeleton /> : <IPOCalendar ipos={ipos} />)}
+                {rightTab === 0 && (
+                  loadingIPOs ? <IPOCalendarSkeleton /> : (
+                    <Suspense fallback={<IPOCalendarSkeleton />}>
+                      <IPOCalendar ipos={ipos} />
+                    </Suspense>
+                  )
+                )}
                 {rightTab === 1 && (
                   <Typography color="text.secondary">{t("reminders.empty")}</Typography>
                 )}
@@ -300,6 +335,7 @@ export default function Dashboard() {
                 onTickerChanged={() =>
                   queryClient.invalidateQueries({ queryKey: ["tickers", user?.id] })
                 }
+                onOptimisticMutation={handleOptimisticMutation}
               />
             </Paper>
           </Grid>
