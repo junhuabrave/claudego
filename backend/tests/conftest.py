@@ -6,6 +6,7 @@ A lightweight test FastAPI app (no lifespan/scheduler) wraps the real routers.
 
 import pytest
 import pytest_asyncio
+from fakeredis.aioredis import FakeRedis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from httpx import ASGITransport, AsyncClient
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.api.auth import router as auth_router
 from app.api.routes import router as api_router
 from app.core.auth import create_access_token
+from app.core.cache import get_redis
 from app.core.database import Base, get_db
 from app.models.models import User
 
@@ -47,7 +49,14 @@ async def db_session(db_engine):
 # ---------------------------------------------------------------------------
 
 @pytest_asyncio.fixture(scope="function")
-async def client(db_session):
+async def fake_redis():
+    """In-process fake Redis — no real Redis required in CI."""
+    async with FakeRedis() as r:
+        yield r
+
+
+@pytest_asyncio.fixture(scope="function")
+async def client(db_session, fake_redis):
     """AsyncClient against a minimal test app (no scheduler, no lifespan)."""
 
     test_app = FastAPI()
@@ -63,7 +72,11 @@ async def client(db_session):
     async def override_get_db():
         yield db_session
 
+    async def override_get_redis():
+        return fake_redis
+
     test_app.dependency_overrides[get_db] = override_get_db
+    test_app.dependency_overrides[get_redis] = override_get_redis
 
     async with AsyncClient(
         transport=ASGITransport(app=test_app), base_url="http://test"

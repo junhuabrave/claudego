@@ -7,6 +7,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from app.core.cache import get_redis, invalidate_all_watchlists, invalidate_news
 from app.core.config import settings
 from app.core.database import async_session
 from app.models.models import IPOEvent, NewsArticle, PriceAlert, Reminder, Ticker, UserWatchlist
@@ -39,6 +40,9 @@ async def poll_news():
                     await ws_manager.broadcast("news", article)
             await session.commit()
         logger.info("Polled %d news articles", len(articles))
+        redis = await get_redis()
+        if redis:
+            await invalidate_news(redis)
     except Exception:
         logger.exception("Error polling news")
 
@@ -93,6 +97,10 @@ async def poll_quotes():
 
         await ws_manager.broadcast("quotes", {"quotes": quotes})
         logger.info("Updated quotes for %d tickers", len(quotes))
+
+        redis = await get_redis()
+        if redis:
+            await invalidate_all_watchlists(redis)
 
         # Track C: check threshold alerts after broadcasting updated prices
         await check_price_alerts(quotes)
